@@ -1,0 +1,79 @@
+<p><img src="../assets/logo/mantis-mini.svg" width="56" alt="Mantis Bat"></p>
+
+# Mantis Bat Overview
+
+Mantis Bat is the official Teleport AI connector framework for `telmi OS`.
+
+Its job is clear: connect external channels to the `telmi OS` runtime without stripping away the identity, memory, governance, and execution model that makes telmi OS useful in the first place.
+
+## Product Boundary
+
+Mantis Bat handles the connector edge:
+
+- inbound channel events
+- outbound channel delivery
+- webhook and cron runtime concerns
+- pairing and connector-level access control
+- channel-specific command routing
+
+`telmi OS` handles the actual operating layer:
+
+- Ghost chat
+- governed memory
+- group-aware context
+- action permissions
+- autonomy registration
+- approval boundaries
+- Ghost execution logic
+
+## Current Public Release
+
+The current shipped connector is a Telegram bot connector for PHP shared hosting.
+
+The repository is shaped as a connector framework, and this is what is public today:
+
+- one Telegram PHP connector module
+- one private paired Telegram owner
+- Ghost chat through `POST /chat`
+- Ghost inbox polling through cron
+- memory upload through `bat_memory_up:`
+
+Core flows:
+
+1. Telegram message enters webhook
+2. Authorized user message is routed to Ghost API v2
+3. Ghost reply is returned to Telegram
+4. Ghost inbox polling can send proactive follow-ups back to Telegram
+
+Special command support starts on day one:
+
+```text
+bat_memory_up: <text>
+```
+
+This sends structured memory data to Ghost API v2 instead of normal chat.
+
+## Why Teleport AI Publishes This
+
+Teleport AI publishes `Mantis Bat` because `telmi OS` is designed as an operating environment, not a prompt toy. Connectors are part of that story. They let developers and community contributors bring real channels into the telmi OS runtime while keeping deployment options flexible.
+
+That gives the connector user access to a Ghost that can already sit on:
+
+- persistent identity
+- governed memory
+- scoped group context
+- Action Mode and approved tools
+- human approval rules
+- Ghost Cockpit visibility on the telmi side
+
+## What Ships Out Of The Box
+
+When Telegram is connected to a properly configured Ghost, the connector can use capabilities that already exist in telmi OS:
+
+- normal conversational replies through `/chat`
+- memory upload through `/memory/upsert`
+- proactive updates through `/inbox`
+- group-aware prompts when `group_id` is allowed by token
+- action-capable Ghost behavior only if the Ghost itself is configured for that on the telmi OS side
+
+Mantis Bat does not recreate those systems. It exposes them through a connector layer that belongs to the larger `telmi OS` product family.

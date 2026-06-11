@@ -1,0 +1,37 @@
+# Secrets
+.env
+*.env
+config.php
+config.local.php
+
+# Runtime storage
+*.sqlite
+*.sqlite3
+*.db
+storage/*.json
+storage/*.log
+storage/logs/*
+modules/**/storage/*.sqlite
+modules/**/storage/*.sqlite3
+modules/**/storage/*.db
+modules/**/storage/*.json
+modules/**/storage/*.log
+modules/**/storage/logs/*
+
+# OS junk
+.DS_Store
+__MACOSX/
+.AppleDouble
+
+# IDE
+.vscode/
+.idea/
+
+# Dependency folders if added later
+vendor/
+node_modules/
+
+# Build/release output
+dist/
+release/
+*.zip

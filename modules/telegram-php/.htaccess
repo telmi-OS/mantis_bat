@@ -1,0 +1,7 @@
+<FilesMatch "\.(env|sqlite|db|json|log)$">
+ Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+ RewriteEngine On
+</IfModule>

@@ -1,0 +1,20 @@
+Ghost API v2 source references used for this repository:
+
+- SwaggerHub page:
+  https://portal.swaggerhub.com/apis/teleportaisolutionsl/ghost-api-v2/2.0.0
+
+- Public OpenAPI JSON:
+  https://teleport-ai.com/assets/api/ghost-api-v2.openapi.json
+
+Verified implementation notes at scaffold time:
+
+- Base URL: https://dev.telmi-ai.com/api/ghost/v2
+- Auth: Authorization: Bearer <ghost-jwt>
+- Chat: POST /chat
+- Inbox: GET /inbox
+- Inbox ack: POST /inbox/ack
+- Memory upsert: POST /memory/upsert
+- Memory list: GET /memory/list
+- Memory delete: POST /memory/delete
+- Memory search: POST /memory/search
+- Settings: GET /settings, POST /settings
