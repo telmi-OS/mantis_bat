@@ -6,10 +6,10 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
-$moduleRoot = require __DIR__ . '/_module_root.php';
+$moduleRoot = dirname(__DIR__);
 foreach ([
     'Security',
-    'Config',
+    'RuntimeConfig',
     'Installer',
     'TelegramClient',
     'GhostClient',
@@ -35,19 +35,10 @@ $healthUrl = '';
 $statusSecret = '';
 $healthSecret = '';
 $unlockAllowed = false;
-$pathChecks = [];
-$resolvedModuleRoot = $moduleRoot;
 
-$existingConfig = new MantisBat\Config($installer->configPath());
+$existingConfig = new MantisBat\RuntimeConfig($installer->configPath());
 if ($locked) {
     $unlockAllowed = $security->verifySecret($unlockToken, (string) $existingConfig->get('app.installer_secret_hash', ''));
-}
-
-$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-$host = (string) ($_SERVER['HTTP_HOST'] ?? '');
-$requestUri = (string) ($_SERVER['REQUEST_URI'] ?? '');
-if ($host !== '' && $requestUri !== '') {
-    $pathChecks = $installer->protectedPathChecks($scheme . '://' . $host . $requestUri);
 }
 
 $defaults = [
@@ -143,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $installer->writeConfig($config);
 
-        $runtimeConfig = new MantisBat\Config($installer->configPath());
+        $runtimeConfig = new MantisBat\RuntimeConfig($installer->configPath());
         $ghost = new MantisBat\GhostClient($runtimeConfig);
         $ghost->readSettings();
 

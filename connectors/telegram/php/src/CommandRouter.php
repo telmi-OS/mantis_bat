@@ -7,7 +7,7 @@ namespace MantisBat;
 final class CommandRouter
 {
     public function __construct(
-        private readonly Config $config,
+        private readonly RuntimeConfig $config,
         private readonly MemoryCommandHandler $memoryHandler,
         private readonly Storage $storage
     ) {

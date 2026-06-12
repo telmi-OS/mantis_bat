@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-$moduleRoot = require __DIR__ . '/_module_root.php';
+$moduleRoot = dirname(__DIR__);
 $services = require $moduleRoot . '/src/bootstrap.php';
 
-/** @var MantisBat\Config $config */
+/** @var MantisBat\RuntimeConfig $config */
 $config = $services['config'];
 /** @var MantisBat\Storage $storage */
 $storage = $services['storage'];

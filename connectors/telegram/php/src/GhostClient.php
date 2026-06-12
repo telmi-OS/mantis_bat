@@ -9,7 +9,7 @@ use RuntimeException;
 final class GhostClient
 {
     public function __construct(
-        private readonly Config $config,
+        private readonly RuntimeConfig $config,
         private readonly ?Logger $logger = null
     ) {
     }
