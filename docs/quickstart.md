@@ -21,7 +21,7 @@ If you want the whole process in one glance, this is it:
 1. Create a Ghost in telmi OS
 2. Create a Ghost JWT
 3. Create a Telegram bot in BotFather
-4. Upload `modules/telegram-php/` to your PHP host
+4. Upload `connectors/telegram/php/` to your PHP host
 5. Open `public/install.php`
 6. Fill the installer form
 7. Save the secret URLs shown by the installer
@@ -174,7 +174,7 @@ Your host needs:
 
 Best practice:
 
-- only expose `modules/telegram-php/public/` to the web
+- only expose `connectors/telegram/php/public/` to the web
 
 Common shared-hosting reality:
 
@@ -226,7 +226,7 @@ If the answer to any of those is no, stop there and fix that first.
 Upload the folder:
 
 ```text
-modules/telegram-php/
+connectors/telegram/php/
 ```
 
 Example final public URL:
@@ -279,14 +279,14 @@ The installer checks:
 Open this file from the repository if you want a checklist of all variables and secrets before you start:
 
 ```text
-modules/telegram-php/.env.example
+connectors/telegram/php/.env.example
 ```
 
 Important:
 
 - the connector does not load `.env` files at runtime in `v0.1.0`
 - this file is only a reference sheet
-- the installer writes the real live config into `modules/telegram-php/storage/config.php`
+- the installer writes the real live config into `connectors/telegram/php/storage/config.php`
 - never commit or publish `storage/config.php`
 
 ### Exact Meaning Of The Reference File
@@ -508,7 +508,7 @@ Bad places:
 After install, the live connector configuration is stored in:
 
 ```text
-modules/telegram-php/storage/config.php
+connectors/telegram/php/storage/config.php
 ```
 
 That file contains secrets such as:
@@ -702,13 +702,13 @@ Never publish:
 
 Most beginners only need to interact with these files and URLs:
 
-- `modules/telegram-php/public/install.php`
-- `modules/telegram-php/public/webhook.php`
-- `modules/telegram-php/public/cron.php`
-- `modules/telegram-php/public/status.php?key=...`
-- `modules/telegram-php/public/health.php?key=...`
-- `modules/telegram-php/storage/config.php`
-- `modules/telegram-php/.env.example`
+- `connectors/telegram/php/public/install.php`
+- `connectors/telegram/php/public/webhook.php`
+- `connectors/telegram/php/public/cron.php`
+- `connectors/telegram/php/public/status.php?key=...`
+- `connectors/telegram/php/public/health.php?key=...`
+- `connectors/telegram/php/storage/config.php`
+- `connectors/telegram/php/.env.example`
 
 ## Final Checklist
 

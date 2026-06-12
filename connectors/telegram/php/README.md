@@ -1,4 +1,4 @@
-<p><img src="../../assets/logo/mantis-mini.svg" width="64" alt="Mantis Bat"></p>
+<p><img src="../../../assets/logo/mantis-mini.svg" width="64" alt="Mantis Bat"></p>
 
 # Mantis Bat Telegram PHP Connector
 
@@ -47,6 +47,14 @@ Treat those URLs and secrets as private operational credentials.
 - the installer creates that file
 - `.env.example` is a reference sheet only
 - the connector does not load `.env` directly at runtime in `v0.1.0`
+
+## Connector Path
+
+The current repository path for this connector is:
+
+```text
+connectors/telegram/php/
+```
 
 ## Commands
 

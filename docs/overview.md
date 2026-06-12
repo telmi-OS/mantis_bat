@@ -32,7 +32,7 @@ The current shipped connector is a Telegram bot connector for PHP shared hosting
 
 The repository is shaped as a connector framework, and this is what is public today:
 
-- one Telegram PHP connector module
+- one Telegram PHP connector module in `connectors/telegram/php/`
 - one private paired Telegram owner
 - Ghost chat through `POST /chat`
 - Ghost inbox polling through cron

@@ -18,7 +18,7 @@ The first public Mantis Bat module is designed for cheap PHP hosting.
 Preferred public web root:
 
 ```text
-modules/telegram-php/public/
+connectors/telegram/php/public/
 ```
 
 Practical shared-hosting reality:
@@ -59,7 +59,7 @@ If any of them downloads, renders, or exposes file contents, stop and fix hostin
 The current connector runtime reads:
 
 ```text
-modules/telegram-php/storage/config.php
+connectors/telegram/php/storage/config.php
 ```
 
 This file is created by the installer.
@@ -67,5 +67,5 @@ This file is created by the installer.
 Important:
 
 - the running connector does not load `.env` directly in `v0.1.0`
-- [modules/telegram-php/.env.example](/Users/tomschaal/Documents/Github/mantis_bat/modules/telegram-php/.env.example) is a reference sheet for the values you will be asked for
+- [connectors/telegram/php/.env.example](/Users/tomschaal/Documents/Github/mantis_bat/connectors/telegram/php/.env.example) is a reference sheet for the values you will be asked for
 - the real live values end up in `storage/config.php`

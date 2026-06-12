@@ -39,4 +39,4 @@ No. `bat_memory_up:` should bypass normal chat and call the public memory upsert
 
 ## Will other channels be supported?
 
-The repository is structured as a connector framework, but the only shipped connector in `v0.1.0` is the Telegram PHP module.
+The repository is structured as a connector framework, but the only shipped connector in `v0.1.0` is the Telegram PHP module in `connectors/telegram/php/`.

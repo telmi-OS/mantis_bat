@@ -17,6 +17,12 @@ modules/**/storage/*.db
 modules/**/storage/*.json
 modules/**/storage/*.log
 modules/**/storage/logs/*
+connectors/**/storage/*.sqlite
+connectors/**/storage/*.sqlite3
+connectors/**/storage/*.db
+connectors/**/storage/*.json
+connectors/**/storage/*.log
+connectors/**/storage/logs/*
 
 # OS junk
 .DS_Store

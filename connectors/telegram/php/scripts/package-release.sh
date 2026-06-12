@@ -3,8 +3,8 @@
 set -euo pipefail
 
 VERSION="${1:-0.1.0}"
-ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-MODULE_DIR="$ROOT_DIR/modules/telegram-php"
+ROOT_DIR="$(cd "$(dirname "$0")/../../../.." && pwd)"
+MODULE_DIR="$ROOT_DIR/connectors/telegram/php"
 DIST_DIR="$ROOT_DIR/dist"
 ZIP_NAME="mantis-bat-telegram-php-v${VERSION}.zip"
 TMP_DIR="$DIST_DIR/package-tmp"

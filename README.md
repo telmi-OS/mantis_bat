@@ -53,7 +53,7 @@ It is talking to a system that already supports:
 The current public implementation is:
 
 ```text
-modules/telegram-php/
+connectors/telegram/php/
 ```
 
 This module is built for:
@@ -126,4 +126,4 @@ Plain-language boundary:
 
 ## Status
 
-`v0.1.0` currently ships the Telegram PHP connector module and the full self-hosted install flow around it.
+`v0.1.0` currently ships the Telegram PHP connector module in `connectors/telegram/php/` and the full self-hosted install flow around it.
