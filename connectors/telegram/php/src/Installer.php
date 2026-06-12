@@ -17,6 +17,9 @@ final class Installer
     public function requirements(): array
     {
         $storageDir = $this->moduleRoot . '/storage';
+        if (!is_dir($storageDir)) {
+            @mkdir($storageDir, 0775, true);
+        }
 
         return [
             'php_version' => PHP_VERSION_ID >= 80100,

@@ -20,8 +20,7 @@ foreach ($candidates as $candidate) {
         is_file($candidate . '/src/Config.php') &&
         is_file($candidate . '/src/Storage.php') &&
         is_file($candidate . '/src/Installer.php') &&
-        is_dir($candidate . '/templates') &&
-        is_dir($candidate . '/storage')
+        is_dir($candidate . '/templates')
     ) {
         return $candidate;
     }
