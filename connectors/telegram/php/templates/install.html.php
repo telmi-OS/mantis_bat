@@ -69,6 +69,21 @@ declare(strict_types=1);
             </section>
         <?php endif; ?>
 
+        <?php if (is_array($ghostProbe)): ?>
+            <section class="card">
+                <h2><span class="gradient-text">Ghost API Probe</span></h2>
+                <p class="copy">This is the direct install-time probe against the Ghost API settings endpoint.</p>
+                <pre><?= htmlspecialchars(
+                    "URL: " . ($ghostProbe['url'] ?? '') . "\n" .
+                    "Status: " . (string) ($ghostProbe['status'] ?? '') . "\n" .
+                    "Content-Type: " . (string) (($ghostProbe['content_type'] ?? '') !== '' ? $ghostProbe['content_type'] : 'unknown') . "\n" .
+                    "Preview: " . $ghostProbePreview,
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?></pre>
+            </section>
+        <?php endif; ?>
+
         <?php if (!$locked || $unlockAllowed): ?>
             <section class="card">
                 <h2><span class="gradient-text">Connector Configuration</span></h2>

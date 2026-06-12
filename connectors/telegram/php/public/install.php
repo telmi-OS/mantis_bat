@@ -35,6 +35,9 @@ $healthUrl = '';
 $statusSecret = '';
 $healthSecret = '';
 $unlockAllowed = false;
+$ghostProbe = null;
+$ghostProbePreview = '';
+$configWritten = false;
 
 $existingConfig = new MantisBat\RuntimeConfig($installer->configPath());
 if ($locked) {
@@ -133,10 +136,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
 
         $installer->writeConfig($config);
+        $configWritten = true;
 
         $runtimeConfig = new MantisBat\RuntimeConfig($installer->configPath());
         $ghost = new MantisBat\GhostClient($runtimeConfig);
-        $ghost->readSettings();
+        $ghostProbe = $ghost->probeSettings();
+        $ghostProbePreview = $ghost->preview((string) $ghostProbe['body']);
+        $decodedProbe = json_decode((string) $ghostProbe['body'], true);
+        if (!is_array($decodedProbe)) {
+            throw new RuntimeException(sprintf(
+                "Ghost API probe failed.\nURL: %s\nStatus: %d\nContent-Type: %s\nPreview: %s",
+                $ghostProbe['url'],
+                (int) $ghostProbe['status'],
+                (string) ($ghostProbe['content_type'] !== '' ? $ghostProbe['content_type'] : 'unknown'),
+                $ghostProbePreview
+            ));
+        }
+        if ((int) $ghostProbe['status'] >= 400 || (($decodedProbe['ok'] ?? true) === false)) {
+            throw new RuntimeException(sprintf(
+                "Ghost API probe failed.\nURL: %s\nStatus: %d\nError: %s",
+                $ghostProbe['url'],
+                (int) $ghostProbe['status'],
+                (string) ($decodedProbe['error'] ?? 'Unknown Ghost API error')
+            ));
+        }
 
         $pairingCode = strtoupper(substr($security->randomToken(8), 0, 6));
         $storage->createPairingCode($pairingCode, time() + 600);
@@ -153,6 +176,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $healthUrl = rtrim($defaults['app_base_url'], '/') . '/health.php?key=' . rawurlencode($healthSecret);
         $message = "Install complete.\nTelegram validated.\nGhost validated.\nWebhook registered.";
     } catch (Throwable $exception) {
+        if ($configWritten && !$locked) {
+            @unlink($installer->configPath());
+            @unlink($installer->lockPath());
+        }
         error_log('[Mantis Bat installer] ' . $exception->getMessage());
         $message = $exception->getMessage();
     }

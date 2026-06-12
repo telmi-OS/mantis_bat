@@ -104,7 +104,48 @@ final class GhostClient
         return $this->request('GET', (string) $this->config->get('ghost.paths.settings', '/settings'));
     }
 
+    public function probeSettings(): array
+    {
+        return $this->rawRequest('GET', (string) $this->config->get('ghost.paths.settings', '/settings'));
+    }
+
     private function request(string $method, string $path, array $payload = [], array $query = []): array
+    {
+        $result = $this->rawRequest($method, $path, $payload, $query);
+        $body = $result['body'];
+        $status = $result['status'];
+        $url = $result['url'];
+        $contentType = $result['content_type'];
+
+        $decoded = json_decode($body, true);
+        if (!is_array($decoded)) {
+            $preview = $this->previewBody($body);
+            $this->logger?->warning('Ghost API returned non-JSON response.', [
+                'path' => $path,
+                'url' => $url,
+                'status' => $status,
+                'content_type' => $contentType,
+                'body_preview' => $preview,
+            ]);
+            throw new RuntimeException(sprintf(
+                'Ghost API returned non-JSON response. URL: %s Status: %d Content-Type: %s Preview: %s',
+                $url,
+                $status,
+                $contentType !== '' ? $contentType : 'unknown',
+                $preview
+            ));
+        }
+
+        if ($status >= 400 || (isset($decoded['ok']) && $decoded['ok'] === false)) {
+            $this->logger?->warning('Ghost API returned an error response.', ['path' => $path, 'url' => $url, 'status' => $status, 'body' => $decoded]);
+            $errorMessage = (string) ($decoded['error'] ?? 'Ghost API request failed.');
+            throw new RuntimeException(sprintf('Ghost API error. URL: %s Status: %d Error: %s', $url, $status, $errorMessage));
+        }
+
+        return $decoded;
+    }
+
+    private function rawRequest(string $method, string $path, array $payload = [], array $query = []): array
     {
         $base = rtrim((string) $this->config->require('ghost.api_base'), '/');
         $url = $base . '/' . ltrim($path, '/');
@@ -144,33 +185,14 @@ final class GhostClient
 
         $rawHeaders = substr($response, 0, $headerSize);
         $body = substr($response, $headerSize);
-        $contentType = $this->extractContentType($rawHeaders);
-        $decoded = json_decode($body, true);
-        if (!is_array($decoded)) {
-            $preview = $this->previewBody($body);
-            $this->logger?->warning('Ghost API returned non-JSON response.', [
-                'path' => $path,
-                'url' => $url,
-                'status' => $status,
-                'content_type' => $contentType,
-                'body_preview' => $preview,
-            ]);
-            throw new RuntimeException(sprintf(
-                'Ghost API returned non-JSON response. URL: %s Status: %d Content-Type: %s Preview: %s',
-                $url,
-                $status,
-                $contentType !== '' ? $contentType : 'unknown',
-                $preview
-            ));
-        }
 
-        if ($status >= 400 || (isset($decoded['ok']) && $decoded['ok'] === false)) {
-            $this->logger?->warning('Ghost API returned an error response.', ['path' => $path, 'url' => $url, 'status' => $status, 'body' => $decoded]);
-            $errorMessage = (string) ($decoded['error'] ?? 'Ghost API request failed.');
-            throw new RuntimeException(sprintf('Ghost API error. URL: %s Status: %d Error: %s', $url, $status, $errorMessage));
-        }
-
-        return $decoded;
+        return [
+            'url' => $url,
+            'status' => $status,
+            'headers' => $rawHeaders,
+            'body' => $body,
+            'content_type' => $this->extractContentType($rawHeaders),
+        ];
     }
 
     private function extractContentType(string $rawHeaders): string
@@ -192,5 +214,10 @@ final class GhostClient
         }
 
         return mb_substr($body, 0, 220);
+    }
+
+    public function preview(string $body): string
+    {
+        return $this->previewBody($body);
     }
 }
