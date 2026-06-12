@@ -125,32 +125,72 @@ final class GhostClient
             CURLOPT_TIMEOUT => 30,
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_HEADER => true,
         ]);
 
         if ($method !== 'GET') {
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_SLASHES));
         }
 
-        $body = curl_exec($ch);
+        $response = curl_exec($ch);
         $error = curl_error($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $headerSize = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
         curl_close($ch);
 
-        if ($body === false) {
+        if ($response === false) {
             throw new RuntimeException('Ghost API request failed: ' . $error);
         }
 
+        $rawHeaders = substr($response, 0, $headerSize);
+        $body = substr($response, $headerSize);
+        $contentType = $this->extractContentType($rawHeaders);
         $decoded = json_decode($body, true);
         if (!is_array($decoded)) {
-            $this->logger?->warning('Ghost API returned non-JSON response.', ['path' => $path, 'status' => $status, 'body' => $body]);
-            throw new RuntimeException('Ghost API did not return valid JSON.');
+            $preview = $this->previewBody($body);
+            $this->logger?->warning('Ghost API returned non-JSON response.', [
+                'path' => $path,
+                'url' => $url,
+                'status' => $status,
+                'content_type' => $contentType,
+                'body_preview' => $preview,
+            ]);
+            throw new RuntimeException(sprintf(
+                'Ghost API returned non-JSON response. URL: %s Status: %d Content-Type: %s Preview: %s',
+                $url,
+                $status,
+                $contentType !== '' ? $contentType : 'unknown',
+                $preview
+            ));
         }
 
         if ($status >= 400 || (isset($decoded['ok']) && $decoded['ok'] === false)) {
-            $this->logger?->warning('Ghost API returned an error response.', ['path' => $path, 'status' => $status, 'body' => $decoded]);
-            throw new RuntimeException((string) ($decoded['error'] ?? 'Ghost API request failed.'));
+            $this->logger?->warning('Ghost API returned an error response.', ['path' => $path, 'url' => $url, 'status' => $status, 'body' => $decoded]);
+            $errorMessage = (string) ($decoded['error'] ?? 'Ghost API request failed.');
+            throw new RuntimeException(sprintf('Ghost API error. URL: %s Status: %d Error: %s', $url, $status, $errorMessage));
         }
 
         return $decoded;
+    }
+
+    private function extractContentType(string $rawHeaders): string
+    {
+        foreach (preg_split("/\r\n|\n|\r/", $rawHeaders) ?: [] as $line) {
+            if (stripos($line, 'Content-Type:') === 0) {
+                return trim(substr($line, strlen('Content-Type:')));
+            }
+        }
+
+        return '';
+    }
+
+    private function previewBody(string $body): string
+    {
+        $body = trim(preg_replace('/\s+/', ' ', $body) ?? $body);
+        if ($body === '') {
+            return '[empty body]';
+        }
+
+        return mb_substr($body, 0, 220);
     }
 }
