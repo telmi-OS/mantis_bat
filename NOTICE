@@ -1,0 +1,12 @@
+Mantis Bat
+Copyright 2026 Teleport AI
+
+This repository is licensed under the Apache License 2.0.
+
+Important boundary:
+
+- The Apache-2.0 license applies to the code and documentation in this repository.
+- It does not by itself grant access to telmi OS, Ghost API credentials, hosted runtime, managed install paths, or any Teleport AI service account.
+- It does not grant trademark rights in Teleport AI, telmi OS, Mantis Bat, Ghost, or related product names, except as allowed by Apache-2.0 section 6.
+
+Use of telmi OS services, Ghost API credentials, hosted runtime, or managed deployment features may be governed by separate Teleport AI product terms.
