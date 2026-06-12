@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-$services = require dirname(__DIR__) . '/src/bootstrap.php';
+$moduleRoot = require __DIR__ . '/_module_root.php';
+$services = require $moduleRoot . '/src/bootstrap.php';
 
 /** @var MantisBat\Config $config */
 $config = $services['config'];
@@ -19,4 +20,4 @@ if ($expectedKey !== '' && !$security->constantTimeEquals($expectedKey, $provide
 }
 
 $status = $config->publicStatus();
-require dirname(__DIR__) . '/templates/status.html.php';
+require $moduleRoot . '/templates/status.html.php';

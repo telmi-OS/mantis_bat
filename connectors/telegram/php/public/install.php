@@ -6,7 +6,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
-$moduleRoot = dirname(__DIR__);
+$moduleRoot = require __DIR__ . '/_module_root.php';
 foreach ([
     'Security',
     'Config',
@@ -166,4 +166,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-require dirname(__DIR__) . '/templates/install.html.php';
+require $moduleRoot . '/templates/install.html.php';

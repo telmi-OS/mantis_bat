@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-$services = require dirname(__DIR__) . '/src/bootstrap.php';
+$moduleRoot = require __DIR__ . '/_module_root.php';
+$services = require $moduleRoot . '/src/bootstrap.php';
 
 /** @var MantisBat\Config $config */
 $config = $services['config'];
@@ -15,7 +16,7 @@ $logger = $services['logger'];
 /** @var MantisBat\Storage $storage */
 $storage = $services['storage'];
 
-$lockPath = dirname(__DIR__) . '/storage/cron.lock';
+$lockPath = $moduleRoot . '/storage/cron.lock';
 $lockHandle = fopen($lockPath, 'c+');
 if ($lockHandle === false) {
     http_response_code(500);
