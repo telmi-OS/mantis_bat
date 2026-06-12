@@ -41,6 +41,8 @@ declare(strict_types=1);
     <div class="card-grid">
         <section class="card">
             <h2><span class="gradient-text">Server Readiness</span></h2>
+            <p class="copy"><strong>Resolved module root</strong></p>
+            <pre><?= htmlspecialchars($resolvedModuleRoot, ENT_QUOTES, 'UTF-8') ?></pre>
             <ul class="clean-list">
                 <?php foreach ($requirements as $name => $result): ?>
                     <li>

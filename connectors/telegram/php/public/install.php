@@ -36,6 +36,7 @@ $statusSecret = '';
 $healthSecret = '';
 $unlockAllowed = false;
 $pathChecks = [];
+$resolvedModuleRoot = $moduleRoot;
 
 $existingConfig = new MantisBat\Config($installer->configPath());
 if ($locked) {

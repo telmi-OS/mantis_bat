@@ -17,6 +17,9 @@ foreach ($candidates as $candidate) {
     if (
         is_dir($candidate . '/src') &&
         is_file($candidate . '/src/bootstrap.php') &&
+        is_file($candidate . '/src/Config.php') &&
+        is_file($candidate . '/src/Storage.php') &&
+        is_file($candidate . '/src/Installer.php') &&
         is_dir($candidate . '/templates') &&
         is_dir($candidate . '/storage')
     ) {
