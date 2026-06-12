@@ -64,4 +64,81 @@ final class Installer
     {
         file_put_contents($this->lockPath(), json_encode(['locked_at' => date('c')], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
+
+    public function protectedPathChecks(?string $installUrl = null): array
+    {
+        if ($installUrl === null || $installUrl === '') {
+            return [];
+        }
+
+        $installParts = parse_url($installUrl);
+        if (!is_array($installParts) || !isset($installParts['scheme'], $installParts['host'], $installParts['path'])) {
+            return [];
+        }
+
+        $base = $installParts['scheme'] . '://' . $installParts['host'];
+        if (isset($installParts['port'])) {
+            $base .= ':' . $installParts['port'];
+        }
+
+        $path = (string) $installParts['path'];
+        $rootPath = preg_replace('#/public/install\.php$#', '', $path) ?? $path;
+        if ($rootPath === $path) {
+            $rootPath = preg_replace('#/install\.php$#', '', $path) ?? $path;
+        }
+
+        $tests = [
+            '/src/Config.php',
+            '/templates/install.html.php',
+            '/scripts/package-release.sh',
+            '/storage/config.php',
+        ];
+
+        $results = [];
+        foreach ($tests as $suffix) {
+            $url = rtrim($base . $rootPath, '/') . $suffix;
+            $results[] = $this->probeUrl($url);
+        }
+
+        return $results;
+    }
+
+    private function probeUrl(string $url): array
+    {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => true,
+            CURLOPT_NOBODY => false,
+            CURLOPT_TIMEOUT => 8,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_USERAGENT => 'MantisBat-Install-Check/0.1.0',
+        ]);
+
+        $response = curl_exec($ch);
+        $error = curl_error($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+
+        if ($response === false) {
+            return [
+                'url' => $url,
+                'status' => 0,
+                'safe' => null,
+                'message' => 'Automatic check unavailable: ' . $error,
+            ];
+        }
+
+        $safe = in_array($status, [401, 403, 404], true);
+        return [
+            'url' => $url,
+            'status' => $status,
+            'safe' => $safe,
+            'message' => $safe
+                ? 'Blocked as expected.'
+                : 'Unexpectedly reachable. Treat this deployment as unsafe until fixed.',
+        ];
+    }
 }

@@ -28,6 +28,32 @@ Some users will upload the whole module into `public_html`. The connector theref
 - protective `.htaccess` defaults where supported
 - runtime behavior that never exposes secrets intentionally
 
+## If You Cannot Point The Web Root To `public/`
+
+This is not the preferred setup, but the module is hardened for the common shared-hosting fallback where the whole folder is uploaded under a public directory.
+
+In that case:
+
+- use only URLs inside `public/`
+- do not browse `src/`, `storage/`, `templates/`, or `scripts/`
+- the bundled `.htaccess` files should block direct access to those paths on Apache-compatible hosting
+
+### Required Manual Checks
+
+After upload, test these in the browser:
+
+```text
+https://example.com/mantis-bat/storage/config.php
+https://example.com/mantis-bat/storage/mantis_bat.sqlite
+https://example.com/mantis-bat/src/Config.php
+https://example.com/mantis-bat/templates/install.html.php
+https://example.com/mantis-bat/scripts/package-release.sh
+```
+
+All of them should fail with `403`, `404`, or an equivalent blocked response.
+
+If any of them downloads, renders, or exposes file contents, stop and fix hosting before using the connector.
+
 ## Runtime Config File
 
 The current connector runtime reads:

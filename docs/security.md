@@ -43,6 +43,8 @@ That means:
 - keep entry points inside `public/`
 - never rely on Apache rules alone
 
+If the whole module is uploaded into a public directory, you must manually test that direct requests to `src/`, `storage/`, `templates/`, and `scripts/` are blocked.
+
 ## Private Operational URLs
 
 After install, these endpoints should be treated like credentials:

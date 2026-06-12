@@ -114,6 +114,16 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - Telegram Bot API: https://core.telegram.org/bots/api
 - Telegram BotFather: https://core.telegram.org/bots/features#botfather
 
+## License
+
+This repository is licensed under [Apache-2.0](LICENSE).
+
+Plain-language boundary:
+
+- the code and docs in this repository are open under Apache-2.0
+- that does not grant rights to use Teleport AI trademarks
+- that does not grant Ghost credentials, telmi OS service access, hosted runtime, or managed install rights
+
 ## Status
 
 `v0.1.0` currently ships the Telegram PHP connector module and the full self-hosted install flow around it.

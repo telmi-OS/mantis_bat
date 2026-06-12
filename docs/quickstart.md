@@ -182,6 +182,33 @@ Common shared-hosting reality:
 
 If you must upload the whole module, the project still tries to protect internal files, but the preferred setup is still a dedicated public folder pointing at `public/`.
 
+### If You Uploaded The Whole Folder Publicly
+
+Before continuing, test these URLs in the browser:
+
+```text
+https://example.com/mantis-bat/storage/config.php
+https://example.com/mantis-bat/storage/mantis_bat.sqlite
+https://example.com/mantis-bat/src/Config.php
+https://example.com/mantis-bat/templates/install.html.php
+```
+
+They must not open.
+
+Good result:
+
+- `403 Forbidden`
+- `404 Not Found`
+- or a host-level blocked page
+
+Bad result:
+
+- file download
+- PHP source display
+- blank page with accessible content
+
+If the result is bad, do not continue with install.
+
 ### Beginner-Friendly Hosting Check
 
 If you do not know whether your host supports the connector, ask your hosting provider these exact questions:

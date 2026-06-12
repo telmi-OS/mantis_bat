@@ -31,10 +31,18 @@ $healthUrl = '';
 $statusSecret = '';
 $healthSecret = '';
 $unlockAllowed = false;
+$pathChecks = [];
 
 $existingConfig = new MantisBat\Config($installer->configPath());
 if ($locked) {
     $unlockAllowed = $security->verifySecret($unlockToken, (string) $existingConfig->get('app.installer_secret_hash', ''));
+}
+
+$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$host = (string) ($_SERVER['HTTP_HOST'] ?? '');
+$requestUri = (string) ($_SERVER['REQUEST_URI'] ?? '');
+if ($host !== '' && $requestUri !== '') {
+    $pathChecks = $installer->protectedPathChecks($scheme . '://' . $host . $requestUri);
 }
 
 $defaults = [

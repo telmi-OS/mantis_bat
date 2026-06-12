@@ -54,6 +54,30 @@ declare(strict_types=1);
             </ul>
         </section>
 
+        <?php if ($pathChecks !== []): ?>
+            <section class="card">
+                <h2><span class="gradient-text">Public Exposure Check</span></h2>
+                <p class="copy">The installer tested a few non-public paths from this server. Continue only if they are blocked.</p>
+                <ul class="clean-list">
+                    <?php foreach ($pathChecks as $check): ?>
+                        <li>
+                            <img src="assets/mantis-pixel-bullet.svg" alt="">
+                            <span>
+                                <strong><?= htmlspecialchars($check['url'], ENT_QUOTES, 'UTF-8') ?></strong><br>
+                                <?php if ($check['safe'] === true): ?>
+                                    <span class="status-ok">HTTP <?= (int) $check['status'] ?>. <?= htmlspecialchars($check['message'], ENT_QUOTES, 'UTF-8') ?></span>
+                                <?php elseif ($check['safe'] === false): ?>
+                                    <span class="status-bad">HTTP <?= (int) $check['status'] ?>. <?= htmlspecialchars($check['message'], ENT_QUOTES, 'UTF-8') ?></span>
+                                <?php else: ?>
+                                    <span class="field-help"><?= htmlspecialchars($check['message'], ENT_QUOTES, 'UTF-8') ?></span>
+                                <?php endif; ?>
+                            </span>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            </section>
+        <?php endif; ?>
+
         <?php if ($locked && !$unlockAllowed): ?>
             <section class="card">
                 <h2><span class="gradient-text">Installer Locked</span></h2>
