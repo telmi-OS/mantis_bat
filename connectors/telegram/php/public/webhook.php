@@ -79,7 +79,7 @@ try {
         exit;
     }
 
-    if (preg_match('/^\/start(?:\s+(.+))?$/i', $text, $matches) === 1) {
+    if (preg_match('/^\/start(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?$/i', $text, $matches) === 1) {
         $pairingCode = trim((string) ($matches[1] ?? ''));
         if ($pairingCode === '') {
             $telegram->sendMessage($chatId, 'This connector is not paired yet.');

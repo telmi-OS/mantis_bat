@@ -162,7 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $pairingCode = strtoupper(substr($security->randomToken(8), 0, 6));
-        $storage->createPairingCode($pairingCode, time() + 600);
+        $storage->createPairingCode($pairingCode, time() + 86400);
 
         $webhookUrl = rtrim($defaults['app_base_url'], '/') . '/webhook.php';
         $telegram->setWebhook($webhookUrl, $defaults['telegram_webhook_secret']);

@@ -76,6 +76,7 @@ final class Storage
 
     public function createPairingCode(string $code, int $expiresAt): void
     {
+        $code = $this->normalizePairingCode($code);
         $stmt = $this->pdo->prepare('INSERT INTO pairing_codes (code, status, created_at, expires_at) VALUES (:code, :status, :created_at, :expires_at)');
         $stmt->execute([
             ':code' => $code,
@@ -87,6 +88,7 @@ final class Storage
 
     public function consumePairingCode(string $code, array $telegramUser): bool
     {
+        $code = $this->normalizePairingCode($code);
         $stmt = $this->pdo->prepare('SELECT * FROM pairing_codes WHERE code = :code LIMIT 1');
         $stmt->execute([':code' => $code]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -115,6 +117,11 @@ final class Storage
             $this->pdo->rollBack();
             throw $exception;
         }
+    }
+
+    private function normalizePairingCode(string $code): string
+    {
+        return strtoupper(trim($code));
     }
 
     public function upsertTelegramAccount(array $telegramUser): void

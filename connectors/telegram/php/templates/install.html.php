@@ -145,6 +145,7 @@ declare(strict_types=1);
                 <p class="copy">The installer has finished. Save everything below in a password manager or private team vault before closing this page.</p>
                 <p><strong>Pairing code</strong></p>
                 <pre><?= htmlspecialchars($pairingCode, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p class="copy">This code is single-use and stays valid for 24 hours.</p>
                 <p><strong>Telegram deep link</strong></p>
                 <pre><?= htmlspecialchars($pairingLink, ENT_QUOTES, 'UTF-8') ?></pre>
                 <p><strong>Cron URL</strong></p>
