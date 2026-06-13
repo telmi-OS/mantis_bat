@@ -2,7 +2,7 @@
 
 # Commands
 
-The Telegram PHP connector supports normal chat plus three connector commands.
+The Telegram PHP connector supports normal chat plus connector commands.
 
 ## Normal Chat
 
@@ -37,17 +37,22 @@ Memory uploaded to your Ghost.
 
 ## Status
 
-Current command:
-
 ```text
 bat_status
 ```
 
-`bat_status` should report connector state without secrets.
+`bat_status` reports connector state without secrets.
+
+Current response includes:
+
+- Telegram connected
+- Ghost API configured
+- paired owner label
+- cron inbox availability
+- memory command availability
+- version
 
 ## Help
-
-Current command:
 
 ```text
 bat_help
@@ -57,5 +62,14 @@ bat_help
 
 - normal chat
 - memory upload
+- memory search command name placeholder
 - status command
 - help command
+
+## Planned But Not Enabled
+
+These command names exist, but currently reply with a not-enabled message:
+
+- `bat_memory_search:`
+- `bat_memory_list`
+- `bat_memory_delete:`

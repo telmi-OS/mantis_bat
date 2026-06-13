@@ -154,6 +154,10 @@ declare(strict_types=1);
                 <pre><?= htmlspecialchars($statusUrl, ENT_QUOTES, 'UTF-8') ?></pre>
                 <p><strong>Health URL</strong></p>
                 <pre><?= htmlspecialchars($healthUrl, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p><strong>Maintenance URL</strong></p>
+                <pre><?= htmlspecialchars($maintenanceUrl, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p><strong>Pairing Recovery URL</strong></p>
+                <pre><?= htmlspecialchars($pairingAdminUrl, ENT_QUOTES, 'UTF-8') ?></pre>
             </section>
         <?php endif; ?>
     </div>

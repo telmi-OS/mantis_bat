@@ -67,4 +67,18 @@ final class Installer
     {
         file_put_contents($this->lockPath(), json_encode(['locked_at' => date('c')], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
+
+    public function resetRuntime(): void
+    {
+        foreach ([
+            $this->databasePath(),
+            $this->configPath(),
+            $this->lockPath(),
+            $this->moduleRoot . '/storage/mantis_bat.log',
+        ] as $path) {
+            if (is_file($path)) {
+                @unlink($path);
+            }
+        }
+    }
 }

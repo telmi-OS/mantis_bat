@@ -150,6 +150,22 @@ final class Storage
         return $stmt->fetchColumn() !== false;
     }
 
+    public function clearTelegramRuntimeData(): void
+    {
+        $this->pdo->beginTransaction();
+
+        try {
+            $this->pdo->exec('DELETE FROM telegram_accounts');
+            $this->pdo->exec('DELETE FROM pairing_codes');
+            $this->pdo->exec('DELETE FROM delivered_inbox_messages');
+            $this->pdo->exec('DELETE FROM inbound_messages');
+            $this->pdo->commit();
+        } catch (\Throwable $exception) {
+            $this->pdo->rollBack();
+            throw $exception;
+        }
+    }
+
     public function getAuthorizedOwner(): ?array
     {
         $stmt = $this->pdo->query('SELECT * FROM telegram_accounts WHERE status = \'active\' ORDER BY id ASC LIMIT 1');

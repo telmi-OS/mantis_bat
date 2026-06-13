@@ -28,7 +28,7 @@ Mantis Bat handles the connector edge:
 
 ## Current Public Release
 
-The current shipped connector is a Telegram bot connector for PHP shared hosting.
+The current shipped connector is a Telegram bot connector for PHP.
 
 The repository is shaped as a connector framework, and this is what is public today:
 
@@ -37,6 +37,8 @@ The repository is shaped as a connector framework, and this is what is public to
 - Ghost chat through `POST /chat`
 - Ghost inbox polling through cron
 - memory upload through `bat_memory_up:`
+- pairing recovery through `pairing.php`
+- protected maintenance actions through `maintenance.php`
 
 Core flows:
 
@@ -45,13 +47,15 @@ Core flows:
 3. Ghost reply is returned to Telegram
 4. Ghost inbox polling can send proactive follow-ups back to Telegram
 
-Special command support starts on day one:
+Current command support:
 
 ```text
 bat_memory_up: <text>
+bat_status
+bat_help
 ```
 
-This sends structured memory data to Ghost API v2 instead of normal chat.
+`bat_memory_up:` sends structured memory data to Ghost API v2 instead of normal chat.
 
 ## Why Teleport AI Publishes This
 

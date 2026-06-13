@@ -32,6 +32,8 @@ $pairingLink = '';
 $cronUrl = '';
 $statusUrl = '';
 $healthUrl = '';
+$maintenanceUrl = '';
+$pairingAdminUrl = '';
 $statusSecret = '';
 $healthSecret = '';
 $unlockAllowed = false;
@@ -174,6 +176,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $healthSecret = (string) $config['app']['health_secret'];
         $statusUrl = rtrim($defaults['app_base_url'], '/') . '/status.php?key=' . rawurlencode($statusSecret);
         $healthUrl = rtrim($defaults['app_base_url'], '/') . '/health.php?key=' . rawurlencode($healthSecret);
+        $maintenanceUrl = rtrim($defaults['app_base_url'], '/') . '/maintenance.php?key=' . rawurlencode($statusSecret);
+        $pairingAdminUrl = rtrim($defaults['app_base_url'], '/') . '/pairing.php?key=' . rawurlencode($statusSecret);
         $message = "Install complete.\nTelegram validated.\nGhost validated.\nWebhook registered.";
     } catch (Throwable $exception) {
         if ($configWritten && !$locked) {

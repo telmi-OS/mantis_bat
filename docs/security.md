@@ -20,6 +20,7 @@ Baseline controls:
 - lock file and overlap protection for cron
 - installer lock after setup
 - secret-protected status and health endpoints
+- secret-protected pairing recovery and maintenance endpoints
 - secret redaction in logs
 
 ## Secrets
@@ -32,18 +33,14 @@ Never commit:
 - SQLite database files
 - logs with sensitive payloads
 
-## Shared Hosting Risk Model
+## Deployment Shape
 
-The connector is built for cheap hosting, so docs must assume imperfect deployment habits.
+The intended deployment shape is simple:
 
-That means:
-
-- protect `storage/` with `.htaccess` where available
-- deny direct access to `.env`, `.db`, `.sqlite`, `.json`, and `.log`
-- keep entry points inside `public/`
-- never rely on Apache rules alone
-
-If the whole module is uploaded into a public directory, you must manually test that direct requests to `src/`, `storage/`, `templates/`, and `scripts/` are blocked.
+- expose `public/`
+- keep `storage/`, `src/`, and `templates/` private
+- keep tokens and secret URLs private
+- use the maintenance page instead of manual file deletion when possible
 
 ## Private Operational URLs
 
@@ -52,6 +49,8 @@ After install, these endpoints should be treated like credentials:
 - `cron.php?key=...`
 - `status.php?key=...`
 - `health.php?key=...`
+- `pairing.php?key=...`
+- `maintenance.php?key=...`
 
 Do not post them in screenshots, GitHub issues, social media, or public support threads.
 

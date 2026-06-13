@@ -62,11 +62,19 @@ This module is built for:
 - SQLite
 - cURL
 - HTTPS
-- cheap shared hosting
+- standard PHP hosting
 - browser installer
 - cron or URL cron
 
 It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2.
+
+Current operational pages include:
+
+- install
+- status
+- health
+- pairing recovery
+- maintenance
 
 ## Managed And Self-Hosted
 

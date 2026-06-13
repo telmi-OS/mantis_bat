@@ -4,7 +4,7 @@
 
 The Telegram PHP connector is the first public connector module in the official Teleport AI `Mantis Bat` framework for `telmi OS`.
 
-It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2 and is designed for cheap shared hosting.
+It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2.
 
 ## Requirements
 
@@ -20,7 +20,11 @@ It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2
 - receives Telegram webhooks
 - forwards normal chat to Ghost API `POST /chat`
 - supports private owner pairing through `/start CODE`
+- provides pairing recovery through `pairing.php`
+- provides protected maintenance actions through `maintenance.php`
 - uploads memory through `bat_memory_up:`
+- reports connector state through `bat_status`
+- reports command usage through `bat_help`
 - polls Ghost inbox through cron and forwards messages to Telegram
 
 ## Install
@@ -37,6 +41,8 @@ The installer also generates:
 - a cron secret
 - a status secret
 - a health secret
+- a maintenance URL
+- a pairing recovery URL
 - an installer lock
 
 Treat those URLs and secrets as private operational credentials.
@@ -72,4 +78,5 @@ bat_help
 - use webhook secret validation
 - use cron secret for HTTP cron mode
 - keep `status.php?key=...` and `health.php?key=...` private
+- keep `pairing.php?key=...` and `maintenance.php?key=...` private
 - keep the installer unlock secret private

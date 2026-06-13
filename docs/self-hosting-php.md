@@ -2,70 +2,75 @@
 
 # Self-Hosting PHP
 
-The first public Mantis Bat module is designed for cheap PHP hosting.
+The Telegram connector is now a normal PHP app.
 
 ## Requirements
 
-- PHP 8.1+
-- cURL extension
-- SQLite extension
-- writable storage directory
+- PHP `8.1+`
+- `cURL`
+- `PDO_SQLite`
 - HTTPS
-- cron or URL cron access
+- writable `storage/`
+- cron access, either CLI cron or URL cron
 
-## Hosting Shape
+## Expected App Shape
 
-Preferred public web root:
+Upload this connector directory:
+
+```text
+connectors/telegram/php/
+```
+
+Expose only this directory to the web:
 
 ```text
 connectors/telegram/php/public/
 ```
 
-Practical shared-hosting reality:
+That is the whole public app surface.
 
-Some users will upload the whole module into `public_html`. The connector therefore needs both:
+## Public Entry Points
 
-- protective `.htaccess` defaults where supported
-- runtime behavior that never exposes secrets intentionally
+- `install.php`
+- `webhook.php`
+- `cron.php`
+- `status.php`
+- `health.php`
+- `pairing.php`
+- `maintenance.php`
 
-## If You Cannot Point The Web Root To `public/`
+## Runtime Files
 
-This is not the preferred setup, but the module is hardened for the common shared-hosting fallback where the whole folder is uploaded under a public directory.
-
-In that case:
-
-- use only URLs inside `public/`
-- do not browse `src/`, `storage/`, `templates/`, or `scripts/`
-- the bundled `.htaccess` files should block direct access to those paths on Apache-compatible hosting
-
-### Required Manual Checks
-
-After upload, test these in the browser:
+The installer creates the live runtime inside:
 
 ```text
-https://example.com/mantis-bat/storage/config.php
-https://example.com/mantis-bat/storage/mantis_bat.sqlite
-https://example.com/mantis-bat/src/Config.php
-https://example.com/mantis-bat/templates/install.html.php
-https://example.com/mantis-bat/scripts/package-release.sh
+connectors/telegram/php/storage/
 ```
 
-All of them should fail with `403`, `404`, or an equivalent blocked response.
+Important runtime files:
 
-If any of them downloads, renders, or exposes file contents, stop and fix hosting before using the connector.
+- `config.php`
+- `mantis_bat.sqlite`
+- `mantis_bat.log`
+- `installed.lock`
 
-## Runtime Config File
+Keep that folder private.
 
-The current connector runtime reads:
+## Config Reality
 
-```text
-connectors/telegram/php/storage/config.php
-```
+- the running connector reads `storage/config.php`
+- the installer creates that file
+- `.env.example` is only a reference sheet
+- the connector does not load `.env` directly at runtime in `v0.1.0`
 
-This file is created by the installer.
+## Operational Pages
 
-Important:
+After install, the connector gives you private operational URLs for:
 
-- the running connector does not load `.env` directly in `v0.1.0`
-- [connectors/telegram/php/.env.example](/Users/tomschaal/Documents/Github/mantis_bat/connectors/telegram/php/.env.example) is a reference sheet for the values you will be asked for
-- the real live values end up in `storage/config.php`
+- cron
+- status
+- health
+- pairing recovery
+- maintenance
+
+Treat those URLs like credentials.

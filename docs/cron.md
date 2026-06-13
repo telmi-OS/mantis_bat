@@ -21,4 +21,6 @@ https://example.com/mantis-bat/public/cron.php?key=CRON_SECRET
 - allow CLI execution without key
 - require key for HTTP execution
 - prevent overlapping runs with a lock file
+- skip delivery when no paired owner exists
+- avoid duplicate delivery by tracking delivered inbox messages
 - acknowledge inbox items only after successful Telegram delivery

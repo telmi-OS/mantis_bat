@@ -37,6 +37,14 @@ It stores the minimum pairing and delivery data needed to operate the connector,
 
 No. `bat_memory_up:` should bypass normal chat and call the public memory upsert endpoint directly.
 
+## Can I recover pairing without reinstalling?
+
+Yes. Use the private `pairing.php?key=...` URL created by the installer to mint a fresh single-use pairing code.
+
+## Can I unpair, switch Ghost, or reset the connector?
+
+Yes. Use the private `maintenance.php?key=...` URL. It supports unpairing, Ghost credential changes, webhook deletion, and full factory reset.
+
 ## Will other channels be supported?
 
 The repository is structured as a connector framework, but the only shipped connector in `v0.1.0` is the Telegram PHP module in `connectors/telegram/php/`.

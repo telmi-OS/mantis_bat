@@ -10,10 +10,6 @@ This guide is the full beginner path for the first shipping Mantis Bat module:
 
 If you have never deployed a PHP tool before, follow the steps in order and do not skip the security notes.
 
-This is the self-hosted path.
-
-If you are using a managed telmi OS deployment path, Teleport AI can also handle connector installation directly inside the telmi OS environment.
-
 ## Super Short Version
 
 If you want the whole process in one glance, this is it:
@@ -28,8 +24,9 @@ If you want the whole process in one glance, this is it:
 8. Open the Telegram pairing link
 9. Press `Start`
 10. Set up cron
-11. Send `hello`
-12. Send `bat_memory_up: something to remember`
+11. Save the maintenance and pairing recovery URLs
+12. Send `hello`
+13. Send `bat_memory_up: something to remember`
 
 Everything below explains those steps slowly and exactly.
 
@@ -54,6 +51,8 @@ When setup is finished, you will have:
 - one private cron URL
 - one private status URL
 - one private health URL
+- one private maintenance URL
+- one private pairing recovery URL
 
 ## What You Must Keep Private
 
@@ -65,6 +64,8 @@ Before doing anything else, understand this:
 - your cron URL is private
 - your status URL is private
 - your health URL is private
+- your maintenance URL is private
+- your pairing recovery URL is private
 - your installer unlock secret is private
 - `storage/config.php` is private
 
@@ -172,42 +173,15 @@ Your host needs:
 
 ### Public Folder Layout
 
-Best practice:
+Expose only this folder to the web:
 
-- only expose `connectors/telegram/php/public/` to the web
+- `connectors/telegram/php/public/`
 
-Common shared-hosting reality:
+Keep the rest of the connector private on the server, especially:
 
-- some users upload the whole module into `public_html`
-
-If you must upload the whole module, the project still tries to protect internal files, but the preferred setup is still a dedicated public folder pointing at `public/`.
-
-### If You Uploaded The Whole Folder Publicly
-
-Before continuing, test these URLs in the browser:
-
-```text
-https://example.com/mantis-bat/storage/config.php
-https://example.com/mantis-bat/storage/mantis_bat.sqlite
-https://example.com/mantis-bat/src/Config.php
-https://example.com/mantis-bat/templates/install.html.php
-```
-
-They must not open.
-
-Good result:
-
-- `403 Forbidden`
-- `404 Not Found`
-- or a host-level blocked page
-
-Bad result:
-
-- file download
-- PHP source display
-- blank page with accessible content
-
-If the result is bad, do not continue with install.
+- `storage/`
+- `src/`
+- `templates/`
 
 ### Beginner-Friendly Hosting Check
 
@@ -229,7 +203,7 @@ Upload the folder:
 connectors/telegram/php/
 ```
 
-Example final public URL:
+Example public install URL:
 
 ```text
 https://example.com/mantis-bat/public/install.php
@@ -482,11 +456,18 @@ Save these immediately:
 - cron URL with secret
 - status URL with secret
 - health URL with secret
+- maintenance URL with secret
+- pairing recovery URL with secret
 - your installer unlock secret
 
 These are the private operational secrets and private operational URLs for the connector.
 
 Treat those URLs like credentials. Do not publish them.
+
+### What The New Private URLs Are For
+
+- `pairing.php?key=...` creates a fresh single-use pairing code without reinstalling
+- `maintenance.php?key=...` lets you unpair, switch Ghost, delete webhook, or factory-reset the connector
 
 ### Save Them Somewhere Safe
 
@@ -532,6 +513,8 @@ After a successful install, you should see:
 - a cron URL
 - a status URL
 - a health URL
+- a maintenance URL
+- a pairing recovery URL
 
 If you do not see those, the install did not finish correctly.
 
@@ -550,6 +533,7 @@ Then:
 3. The bot sends `/start CODE` to your connector
 4. The connector stores your Telegram user ID and chat ID
 5. The pairing code becomes invalid after use
+6. If pairing fails, use the pairing recovery URL to mint a fresh code
 
 Expected success message:
 
