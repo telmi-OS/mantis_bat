@@ -37,6 +37,16 @@ It stores the minimum pairing and delivery data needed to operate the connector,
 
 No. `bat_memory_up:` should bypass normal chat and call the public memory upsert endpoint directly.
 
+## Does Telegram get the final chat reply directly from `/chat`?
+
+No.
+
+The connector sends normal chat in queued mode:
+
+- `/chat` returns an acknowledgement
+- the final Ghost reply arrives later through `/inbox`
+- cron must be running for Telegram users to receive that reply
+
 ## Can I recover pairing without reinstalling?
 
 Yes. Use the private `pairing.php?key=...` URL created by the installer to mint a fresh single-use pairing code.

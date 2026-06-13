@@ -51,9 +51,13 @@ Current connector request shape:
 ```json
 {
   "message": "Hello from Telegram",
+  "mode": "queued",
   "meta": {
     "source": "mantis_bat",
     "channel": "telegram"
+  },
+  "options": {
+    "mode": "queued"
   }
 }
 ```
@@ -71,6 +75,19 @@ Expected success body:
 ```
 
 The connector should normalize `reply` first and treat missing `reply` as an upstream error.
+
+## Queued Chat Mode
+
+Ghost API v2 chat supports queued execution.
+
+For queued use:
+
+- send `mode: queued`
+- or send `options.mode: queued`
+- `/chat` returns an acknowledgement
+- collect the later assistant response through `/inbox`
+
+The Telegram PHP connector now uses queued mode for normal chat, so the webhook request does not wait for the final assistant reply.
 
 ## Memory Upsert Shape
 

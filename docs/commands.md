@@ -6,13 +6,20 @@ The Telegram PHP connector supports normal chat plus connector commands.
 
 ## Normal Chat
 
-Any plain message is forwarded to the Ghost chat endpoint.
+Any plain message is forwarded to the Ghost chat endpoint in queued mode.
 
 Example:
 
 ```text
 What should I focus on today?
 ```
+
+Behavior:
+
+- the connector sends the message to `POST /chat`
+- it sets queued mode
+- it does not wait for the final assistant reply in the webhook request
+- the later Ghost answer is delivered through inbox polling
 
 ## Memory Upload
 
@@ -47,6 +54,7 @@ Current response includes:
 
 - Telegram connected
 - Ghost API configured
+- chat mode queued
 - paired owner label
 - cron inbox availability
 - memory command availability

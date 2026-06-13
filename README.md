@@ -76,6 +76,12 @@ Current operational pages include:
 - pairing recovery
 - maintenance
 
+Current Telegram delivery model:
+
+- normal chat is sent to Ghost API in queued mode
+- the connector does not wait for a direct assistant reply from `/chat`
+- Ghost replies come back through inbox polling
+
 ## Managed And Self-Hosted
 
 `Mantis Bat` supports the self-hosted path.

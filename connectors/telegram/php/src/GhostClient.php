@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace MantisBat;
 
-use RuntimeException;
-
 final class GhostClient
 {
     public function __construct(
@@ -16,21 +14,21 @@ final class GhostClient
 
     public function chat(string $message, array $options = []): array
     {
+        $options['mode'] = 'queued';
+
         $payload = [
             'message' => $message,
+            'mode' => 'queued',
             'meta' => [
                 'source' => 'mantis_bat',
                 'channel' => 'telegram',
             ],
+            'options' => $options,
         ];
 
         $groupId = $this->config->get('ghost.default_group_id', '');
         if ($groupId !== '') {
             $payload['group_id'] = $groupId;
-        }
-
-        if ($options !== []) {
-            $payload['options'] = $options;
         }
 
         return $this->request('POST', (string) $this->config->get('ghost.paths.chat', '/chat'), $payload);

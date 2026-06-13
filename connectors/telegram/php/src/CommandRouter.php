@@ -34,7 +34,7 @@ final class CommandRouter
         if ($normalized === $statusCommand) {
             $owner = $this->storage->getAuthorizedOwner();
             $ownerLabel = $owner && ($owner['username'] ?? '') !== '' ? '@' . $owner['username'] : 'paired';
-            return new Response("Mantis Bat status\n\nTelegram: connected\nGhost API: configured\nOwner: {$ownerLabel}\nInbox polling: available via cron\nMemory command: enabled\nVersion: " . $this->config->get('app.version', '0.1.0'));
+            return new Response("Mantis Bat status\n\nTelegram: connected\nGhost API: configured\nChat mode: queued\nOwner: {$ownerLabel}\nInbox polling: required for replies\nMemory command: enabled\nVersion: " . $this->config->get('app.version', '0.1.0'));
         }
 
         if (str_starts_with($normalized, $searchPrefix) || $normalized === $listCommand || str_starts_with($normalized, $deletePrefix)) {

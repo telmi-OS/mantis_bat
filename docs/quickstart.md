@@ -83,8 +83,9 @@ It sits between:
 
 That means:
 
-- Telegram messages go to your Ghost through your connector
-- proactive Ghost inbox messages can come back to Telegram
+- Telegram messages go to your Ghost through your connector in queued mode
+- Ghost replies come back through inbox polling
+- proactive Ghost inbox messages can also come back to Telegram
 - you stay in control of the bot token and hosting path
 
 ## Step 1: Create Or Choose Your Ghost
@@ -555,6 +556,8 @@ This Mantis Bat connector is private.
 
 This is required for Ghost inbox polling.
 
+It is also required for normal Ghost chat replies in the current Telegram connector, because chat uses queued mode.
+
 ### Preferred: CLI Cron
 
 Example:
@@ -599,10 +602,11 @@ Expected behavior:
 - Telegram sends the webhook to your connector
 - your connector validates the webhook secret
 - your connector verifies you are the paired owner
-- your connector calls `POST /chat`
-- the Ghost reply is sent back to Telegram
+- your connector calls `POST /chat` in queued mode
+- Ghost API acknowledges the request
+- the later Ghost reply is delivered back to Telegram through cron inbox polling
 
-If the reply is very long, the connector splits it into smaller Telegram-safe messages.
+If the reply is very long, the connector splits it into smaller Telegram-safe messages when the inbox poller delivers it.
 
 ### What To Do If Nothing Comes Back
 
@@ -612,6 +616,7 @@ Check:
 - is the webhook URL correct?
 - is the Telegram webhook secret correct?
 - is the Ghost JWT valid?
+- is cron running?
 - does `health.php?key=...` show `installed: true`?
 
 ## Step 11: Test Memory Upload
@@ -703,7 +708,7 @@ Before calling the setup finished, make sure all of these are true:
 - Ghost JWT validated
 - webhook registered
 - pairing link worked
-- `hello` gets a Ghost reply
+- `hello` gets a Ghost reply through inbox polling
 - `bat_memory_up: ...` succeeds
 - cron is configured
 - private URLs were saved
