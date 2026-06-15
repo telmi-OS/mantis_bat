@@ -38,6 +38,8 @@ It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2
 
 Normal chat replies are not returned directly from the webhook request. They come back later through inbox polling, so cron is required for normal reply delivery.
 
+If a live Ghost runtime returns a usable inline reply while still reporting queued mode, the connector forwards that reply immediately as a fallback.
+
 The installer also generates:
 
 - a cron secret

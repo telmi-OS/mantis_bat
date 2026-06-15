@@ -47,6 +47,11 @@ The connector sends normal chat in queued mode:
 - the final Ghost reply arrives later through `/inbox`
 - cron must be running for Telegram users to receive that reply
 
+Live runtime note:
+
+- some Ghost runtimes currently return the reply inline even with `mode: queued`
+- the connector accepts that inline queued reply as a fallback
+
 ## Can I recover pairing without reinstalling?
 
 Yes. Use the private `pairing.php?key=...` URL created by the installer to mint a fresh single-use pairing code.

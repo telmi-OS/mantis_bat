@@ -89,6 +89,12 @@ For queued use:
 
 The Telegram PHP connector now uses queued mode for normal chat, so the webhook request does not wait for the final assistant reply.
 
+Live runtime note:
+
+- the published contract says queued mode should acknowledge `/chat` and deliver the later assistant response through `/inbox`
+- some live Ghost runtimes may still return a usable assistant reply inline while reporting `status: queued`
+- the Telegram connector now accepts that inline reply as a fallback when no queued `job_id` is present
+
 ## Memory Upsert Shape
 
 Verified request shape:

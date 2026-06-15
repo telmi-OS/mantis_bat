@@ -32,6 +32,12 @@ https://example.com/mantis-bat/public/cron.php?key=CRON_SECRET
 
 Without a working cron, Telegram users can send messages to Ghost, but they will not receive the later queued reply.
 
+Exception:
+
+- some live Ghost runtimes may return a usable reply inline even when queued mode is requested
+- in that case the connector forwards the inline reply immediately
+- inbox polling is still required for proactive messages and for queued runtimes that follow the documented inbox flow
+
 Current cron JSON includes counters such as:
 
 - `fetched`

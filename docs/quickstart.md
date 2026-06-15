@@ -608,6 +608,12 @@ Expected behavior:
 
 If the reply is very long, the connector splits it into smaller Telegram-safe messages when the inbox poller delivers it.
 
+Runtime note:
+
+- the ideal Ghost API v2 queued flow is later inbox delivery
+- some live runtimes may still return the answer inline even with `mode: queued`
+- the connector now forwards that inline reply as a fallback
+
 ### What To Do If Nothing Comes Back
 
 Check:
