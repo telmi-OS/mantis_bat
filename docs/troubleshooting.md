@@ -32,6 +32,8 @@
 - confirm `owner_chat_id` or paired owner exists
 - confirm cron key for URL mode
 - confirm inbox endpoint returns items
+- call `cron.php?key=...` manually once and inspect `fetched`, `delivered`, and `skipped`
+- if `fetched > 0` and `delivered = 0`, inspect connector logs because inbox items may not match the expected text/id shape
 
 ## Status Or Health Returns Not Found
 

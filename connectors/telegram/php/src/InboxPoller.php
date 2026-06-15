@@ -19,7 +19,7 @@ final class InboxPoller
     {
         $owner = $this->storage->getAuthorizedOwner();
         if ($owner === null) {
-            return ['ok' => true, 'delivered' => 0, 'reason' => 'no_owner'];
+            return ['ok' => true, 'fetched' => 0, 'delivered' => 0, 'skipped' => 0, 'reason' => 'no_owner'];
         }
 
         $chatId = (string) $owner['telegram_chat_id'];
@@ -29,19 +29,25 @@ final class InboxPoller
             $items = [];
         }
 
+        $fetched = count($items);
         $delivered = 0;
+        $skipped = 0;
         foreach ($items as $item) {
             if (!is_array($item)) {
+                $skipped++;
                 continue;
             }
 
-            $messageId = (string) ($item['id'] ?? $item['message_id'] ?? '');
+            $messageId = $this->normalizeMessageId($item);
             $text = $this->normalizeText($item);
             if ($messageId === '' || $text === '') {
+                $skipped++;
+                $this->logger?->warning('Inbox item skipped because it did not contain a usable id or text.', ['item' => $item]);
                 continue;
             }
 
             if ($this->storage->hasDeliveredInboxMessage($messageId, $chatId)) {
+                $skipped++;
                 continue;
             }
 
@@ -55,20 +61,84 @@ final class InboxPoller
             $delivered++;
         }
 
-        $this->logger?->info('Inbox poller run completed.', ['delivered' => $delivered]);
+        $this->logger?->info('Inbox poller run completed.', ['fetched' => $fetched, 'delivered' => $delivered, 'skipped' => $skipped]);
 
-        return ['ok' => true, 'delivered' => $delivered];
+        return ['ok' => true, 'fetched' => $fetched, 'delivered' => $delivered, 'skipped' => $skipped];
     }
 
     private function normalizeText(array $item): string
     {
-        foreach (['text', 'message', 'content', 'body'] as $key) {
-            $value = trim((string) ($item[$key] ?? ''));
+        foreach ([
+            ['text'],
+            ['message'],
+            ['content'],
+            ['body'],
+            ['reply'],
+            ['data', 'reply'],
+            ['data', 'text'],
+            ['data', 'message'],
+            ['payload', 'reply'],
+            ['payload', 'text'],
+            ['payload', 'message'],
+        ] as $path) {
+            $value = $this->readNestedString($item, $path);
             if ($value !== '') {
                 return $value;
             }
         }
 
         return '';
+    }
+
+    private function normalizeMessageId(array $item): string
+    {
+        foreach ([
+            ['id'],
+            ['message_id'],
+            ['data', 'id'],
+            ['data', 'message_id'],
+            ['payload', 'id'],
+            ['payload', 'message_id'],
+        ] as $path) {
+            $value = $this->readNestedScalar($item, $path);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return '';
+    }
+
+    private function readNestedString(array $item, array $path): string
+    {
+        $value = $this->readPath($item, $path);
+        if (!is_string($value) && !is_numeric($value)) {
+            return '';
+        }
+
+        return trim((string) $value);
+    }
+
+    private function readNestedScalar(array $item, array $path): string
+    {
+        $value = $this->readPath($item, $path);
+        if (!is_string($value) && !is_int($value) && !is_float($value)) {
+            return '';
+        }
+
+        return trim((string) $value);
+    }
+
+    private function readPath(array $item, array $path): mixed
+    {
+        $value = $item;
+        foreach ($path as $segment) {
+            if (!is_array($value) || !array_key_exists($segment, $value)) {
+                return null;
+            }
+            $value = $value[$segment];
+        }
+
+        return $value;
     }
 }

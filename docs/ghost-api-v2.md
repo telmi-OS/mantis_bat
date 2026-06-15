@@ -119,7 +119,15 @@ This means `bat_memory_up:` targets `POST /memory/upsert` with an `items` array.
 - `data.items`
 - top-level `items`
 
-The connector normalizes both container positions and then checks fields such as `text`, `message`, `content`, or `body`.
+The connector normalizes both container positions and then checks likely reply-bearing fields such as:
+
+- `text`
+- `message`
+- `content`
+- `body`
+- `reply`
+- nested `data.*`
+- nested `payload.*`
 
 ## Ack Shape
 

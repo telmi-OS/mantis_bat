@@ -31,3 +31,11 @@ https://example.com/mantis-bat/public/cron.php?key=CRON_SECRET
 - acknowledge inbox items only after successful Telegram delivery
 
 Without a working cron, Telegram users can send messages to Ghost, but they will not receive the later queued reply.
+
+Current cron JSON includes counters such as:
+
+- `fetched`
+- `delivered`
+- `skipped`
+
+That makes it easier to tell whether the inbox is empty or whether inbox items were returned but could not be delivered.
