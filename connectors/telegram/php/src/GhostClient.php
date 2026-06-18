@@ -83,12 +83,16 @@ final class GhostClient
         ]);
     }
 
-    public function pullInbox(): array
+    public function pullInbox(?string $groupId = null): array
     {
-        return $this->request('GET', (string) $this->config->get('ghost.paths.inbox', '/inbox'), [], [
-            'group_id' => (string) $this->config->get('ghost.default_group_id', ''),
+        $query = [
             'limit' => (int) $this->config->get('limits.cron_batch_size', 20),
-        ]);
+        ];
+        if ($groupId !== null && trim($groupId) !== '') {
+            $query['group_id'] = trim($groupId);
+        }
+
+        return $this->request('GET', (string) $this->config->get('ghost.paths.inbox', '/inbox'), [], $query);
     }
 
     public function pullInboxGroups(): array

@@ -52,12 +52,6 @@ final class ChatHandler
     {
         $messages = [];
         $primaryReply = $this->extractPrimaryReply($response);
-        $status = trim((string) ($response['status'] ?? ''));
-        $jobId = trim((string) ($response['job_id'] ?? ''));
-
-        if ($status === 'queued' && $jobId !== '') {
-            $messages[] = 'Message queued.';
-        }
 
         foreach ([
             ['data', 'message'],
@@ -66,9 +60,15 @@ final class ChatHandler
             ['data', 'warning'],
             ['data', 'status_message'],
             ['data', 'system_message'],
+            ['data', 'acknowledgement'],
+            ['data', 'ack'],
             ['message'],
             ['notice'],
             ['warning'],
+            ['status_message'],
+            ['system_message'],
+            ['acknowledgement'],
+            ['ack'],
         ] as $path) {
             $value = $this->readPath($response, $path);
             if (!is_string($value)) {

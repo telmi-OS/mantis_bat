@@ -8,6 +8,7 @@ final class InboxPoller
 {
     public function __construct(
         private readonly Storage $storage,
+        private readonly RuntimeConfig $config,
         private readonly GhostClient $ghostClient,
         private readonly TelegramClient $telegramClient,
         private readonly MessageSplitter $splitter,
@@ -23,14 +24,18 @@ final class InboxPoller
         }
 
         $chatId = (string) $owner['telegram_chat_id'];
+        $configuredGroupId = trim((string) $this->config->get('ghost.default_group_id', ''));
         $personalResponse = $this->ghostClient->pullInbox();
+        $configuredGroupResponse = $configuredGroupId !== '' ? $this->ghostClient->pullInbox($configuredGroupId) : ['data' => ['items' => []], 'items' => []];
         $groupResponse = $this->ghostClient->pullInboxGroups();
         $messages = [
             ...$this->extractInboxMessages($personalResponse, false),
+            ...$this->extractInboxMessages($configuredGroupResponse, $configuredGroupId !== ''),
             ...$this->extractInboxMessages($groupResponse, true),
         ];
 
         $fetched = count($personalResponse['data']['items'] ?? $personalResponse['items'] ?? []);
+        $fetchedConfiguredGroup = count($configuredGroupResponse['data']['items'] ?? $configuredGroupResponse['items'] ?? []);
         $fetchedGroups = count($groupResponse['data']['items'] ?? $groupResponse['items'] ?? []);
         $delivered = 0;
         $skipped = 0;
@@ -77,12 +82,13 @@ final class InboxPoller
 
         $this->logger?->info('Inbox poller run completed.', [
             'fetched' => $fetched,
+            'fetched_configured_group' => $fetchedConfiguredGroup,
             'fetched_groups' => $fetchedGroups,
             'delivered' => $delivered,
             'skipped' => $skipped,
         ]);
 
-        return ['ok' => true, 'fetched' => $fetched, 'fetched_groups' => $fetchedGroups, 'delivered' => $delivered, 'skipped' => $skipped];
+        return ['ok' => true, 'fetched' => $fetched, 'fetched_configured_group' => $fetchedConfiguredGroup, 'fetched_groups' => $fetchedGroups, 'delivered' => $delivered, 'skipped' => $skipped];
     }
 
     private function extractInboxMessages(array $response, bool $isGroupResponse): array
@@ -206,12 +212,30 @@ final class InboxPoller
             ['content'],
             ['body'],
             ['reply'],
+            ['notice'],
+            ['warning'],
+            ['status_message'],
+            ['system_message'],
+            ['acknowledgement'],
+            ['ack'],
             ['data', 'reply'],
             ['data', 'text'],
             ['data', 'message'],
+            ['data', 'notice'],
+            ['data', 'warning'],
+            ['data', 'status_message'],
+            ['data', 'system_message'],
+            ['data', 'acknowledgement'],
+            ['data', 'ack'],
             ['payload', 'reply'],
             ['payload', 'text'],
             ['payload', 'message'],
+            ['payload', 'notice'],
+            ['payload', 'warning'],
+            ['payload', 'status_message'],
+            ['payload', 'system_message'],
+            ['payload', 'acknowledgement'],
+            ['payload', 'ack'],
         ] as $path) {
             $value = $this->readNestedString($item, $path);
             if ($value !== '') {
@@ -242,6 +266,31 @@ final class InboxPoller
             }
         }
 
+        foreach ([
+            ['notice'],
+            ['warning'],
+            ['status_message'],
+            ['system_message'],
+            ['acknowledgement'],
+            ['ack'],
+            ['data', 'notice'],
+            ['data', 'warning'],
+            ['data', 'status_message'],
+            ['data', 'system_message'],
+            ['data', 'acknowledgement'],
+            ['data', 'ack'],
+            ['payload', 'notice'],
+            ['payload', 'warning'],
+            ['payload', 'status_message'],
+            ['payload', 'system_message'],
+            ['payload', 'acknowledgement'],
+            ['payload', 'ack'],
+        ] as $path) {
+            if ($this->readNestedString($item, $path) !== '') {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -250,10 +299,13 @@ final class InboxPoller
         foreach ([
             ['id'],
             ['message_id'],
+            ['uuid'],
             ['data', 'id'],
             ['data', 'message_id'],
+            ['data', 'uuid'],
             ['payload', 'id'],
             ['payload', 'message_id'],
+            ['payload', 'uuid'],
         ] as $path) {
             $value = $this->readNestedScalar($item, $path);
             if ($value !== '') {

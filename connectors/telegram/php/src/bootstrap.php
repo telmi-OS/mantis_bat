@@ -55,7 +55,7 @@ $splitter = new MessageSplitter((int) $config->get('limits.telegram_max_message_
 $memoryHandler = new MemoryCommandHandler($config, $ghost);
 $commandRouter = new CommandRouter($config, $memoryHandler, $storage);
 $chatHandler = new ChatHandler($ghost, $telegram, $splitter);
-$inboxPoller = new InboxPoller($storage, $ghost, $telegram, $splitter, $logger);
+$inboxPoller = new InboxPoller($storage, $config, $ghost, $telegram, $splitter, $logger);
 $installer = new Installer($moduleRoot, $security);
 
 return [
