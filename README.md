@@ -82,7 +82,8 @@ Current Telegram delivery model:
 - history is enabled in the chat request
 - the connector does not wait for a direct assistant reply from `/chat`
 - Ghost replies come back through inbox polling
-- cron also polls `/inbox_groups` for active group inbox delivery
+- cron polls `/inbox` and `/inbox_groups`
+- the connector keeps its own local inbox backend so Telegram delivery is deduped and time-ordered across both sources
 
 ## Managed And Self-Hosted
 

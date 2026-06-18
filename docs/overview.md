@@ -37,6 +37,7 @@ The repository is shaped as a connector framework, and this is what is public to
 - Ghost chat submission through `POST /chat` in queued mode
 - Ghost chat history enabled in the request payload
 - Ghost inbox polling through cron for replies, proactive delivery, and active-group inbox fan-out
+- local SQLite inbox buffering for dedupe, baseline seeding, and cross-feed ordering
 - memory upload through `bat_memory_up:`
 - pairing recovery through `pairing.php`
 - protected maintenance actions through `maintenance.php`
@@ -48,7 +49,8 @@ Core flows:
 3. `/chat` returns an acknowledgement instead of the final assistant reply
 4. Ghost inbox polling sends the later assistant reply back to Telegram
 5. The same cron loop also polls `/inbox_groups` for current active group inbox rows
-6. System acknowledgements can be surfaced to Telegram as labeled system notices
+6. Both feeds are merged into the connector-local inbox backend and sorted before delivery
+7. System acknowledgements can be surfaced to Telegram as labeled system notices
 
 Current command support:
 
@@ -82,6 +84,7 @@ When Telegram is connected to a properly configured Ghost, the connector can use
 - Ghost reply delivery through `/inbox`
 - group reply delivery through `/inbox_groups`
 - proactive updates through `/inbox`
+- connector-local dedupe and ordering across both inbox feeds
 - group-aware prompts when `group_id` is allowed by token
 - action-capable Ghost behavior only if the Ghost itself is configured for that on the telmi OS side
 

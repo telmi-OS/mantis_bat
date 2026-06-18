@@ -67,6 +67,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'disconnect_webhook') {
             $telegram->deleteWebhook();
             $message = 'Telegram webhook removed.';
+        } elseif ($action === 'reset_inbox_backend') {
+            $storage->resetInboxBackend();
+            $message = 'Local inbox backend reset. Pairing, config, and webhook were kept. The next cron run will seed a fresh baseline from telmi OS without replaying old Telegram history.';
         } elseif ($action === 'switch_ghost') {
             $ghostApiBase = isset($_POST['ghost_api_base']) && is_string($_POST['ghost_api_base']) ? rtrim(trim($_POST['ghost_api_base']), '/') : '';
             $ghostApiToken = isset($_POST['ghost_api_token']) && is_string($_POST['ghost_api_token']) ? trim($_POST['ghost_api_token']) : '';
@@ -220,6 +223,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <input type="hidden" name="action" value="disconnect_webhook">
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
                     <button type="submit">Delete Telegram Webhook</button>
+                </form>
+            </section>
+
+            <section class="card">
+                <h2><span class="gradient-text">Inbox Backend Reset</span></h2>
+                <p class="copy">This clears only the connector-local inbox cache, delivery markers, and baseline flag. It keeps pairing, Ghost config, webhook registration, and the rest of the runtime intact. Use this when telmi OS stays the source of truth and you want the connector to restart its inbox lifecycle cleanly.</p>
+                <form method="post">
+                    <input type="hidden" name="action" value="reset_inbox_backend">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
+                    <button type="submit">Reset Local Inbox Backend</button>
                 </form>
             </section>
 

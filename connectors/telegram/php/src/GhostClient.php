@@ -86,7 +86,7 @@ final class GhostClient
     public function pullInbox(?string $groupId = null): array
     {
         $query = [
-            'limit' => (int) $this->config->get('limits.cron_batch_size', 20),
+            'limit' => (int) $this->config->get('limits.cron_batch_size', 50),
         ];
         if ($groupId !== null && trim($groupId) !== '') {
             $query['group_id'] = trim($groupId);
@@ -98,7 +98,7 @@ final class GhostClient
     public function pullInboxGroups(): array
     {
         return $this->request('GET', (string) $this->config->get('ghost.paths.inbox_groups', '/inbox_groups'), [], [
-            'limit' => (int) $this->config->get('limits.cron_batch_size', 20),
+            'limit' => (int) $this->config->get('limits.cron_batch_size', 50),
         ]);
     }
 

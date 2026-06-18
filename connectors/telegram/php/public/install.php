@@ -134,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'telegram_max_message_chars' => 3900,
                 'max_inbound_message_chars' => 20000,
                 'max_memory_upload_chars' => 50000,
-                'cron_batch_size' => 20,
+                'cron_batch_size' => 50,
             ],
         ];
 

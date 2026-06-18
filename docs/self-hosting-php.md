@@ -74,3 +74,12 @@ After install, the connector gives you private operational URLs for:
 - maintenance
 
 Treat those URLs like credentials.
+
+The maintenance page can:
+
+- unpair the Telegram owner
+- mint a fresh pairing code
+- switch Ghost credentials
+- delete the Telegram webhook
+- reset only the local inbox backend
+- factory-reset the whole connector

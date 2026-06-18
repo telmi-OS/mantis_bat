@@ -58,7 +58,7 @@ Current response includes:
 - chat mode queued
 - history enabled
 - paired owner label
-- cron inbox availability for ghost + groups
+- cron inbox availability for personal + merged groups
 - memory command availability
 - version
 

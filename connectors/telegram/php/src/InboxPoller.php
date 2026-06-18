@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MantisBat;
 
+use RuntimeException;
+
 final class InboxPoller
 {
     public function __construct(
@@ -20,141 +22,250 @@ final class InboxPoller
     {
         $owner = $this->storage->getAuthorizedOwner();
         if ($owner === null) {
-            return ['ok' => true, 'fetched' => 0, 'fetched_groups' => 0, 'delivered' => 0, 'skipped' => 0, 'reason' => 'no_owner'];
+            return ['ok' => true, 'fetched' => 0, 'fetched_groups' => 0, 'seeded' => 0, 'ingested' => 0, 'delivered' => 0, 'reason' => 'no_owner'];
         }
 
         $chatId = (string) $owner['telegram_chat_id'];
-        $configuredGroupId = trim((string) $this->config->get('ghost.default_group_id', ''));
-        $personalResponse = $this->ghostClient->pullInbox();
-        $configuredGroupResponse = $configuredGroupId !== '' ? $this->ghostClient->pullInbox($configuredGroupId) : ['data' => ['items' => []], 'items' => []];
-        $groupResponse = $this->ghostClient->pullInboxGroups();
-        $messages = [
-            ...$this->extractInboxMessages($personalResponse, false),
-            ...$this->extractInboxMessages($configuredGroupResponse, $configuredGroupId !== ''),
-            ...$this->extractInboxMessages($groupResponse, true),
-        ];
+        $fetchedAt = time();
 
-        $fetched = count($personalResponse['data']['items'] ?? $personalResponse['items'] ?? []);
-        $fetchedConfiguredGroup = count($configuredGroupResponse['data']['items'] ?? $configuredGroupResponse['items'] ?? []);
-        $fetchedGroups = count($groupResponse['data']['items'] ?? $groupResponse['items'] ?? []);
+        $personalResponse = null;
+        $groupResponse = null;
+        $fetchErrors = [];
+
+        try {
+            $personalResponse = $this->ghostClient->pullInbox();
+        } catch (\Throwable $exception) {
+            $fetchErrors['personal'] = $exception->getMessage();
+            $this->logger?->warning('Personal Ghost inbox poll failed.', ['error' => $exception->getMessage()]);
+        }
+
+        try {
+            $groupResponse = $this->ghostClient->pullInboxGroups();
+        } catch (\Throwable $exception) {
+            $fetchErrors['group_merged'] = $exception->getMessage();
+            $this->logger?->warning('Merged Ghost group inbox poll failed.', ['error' => $exception->getMessage()]);
+        }
+
+        if ($personalResponse === null && $groupResponse === null) {
+            throw new RuntimeException('All Ghost inbox polls failed.');
+        }
+
+        $personalMessages = $personalResponse !== null ? $this->extractPersonalMessages($personalResponse, $fetchedAt) : [];
+        $groupMessages = $groupResponse !== null ? $this->extractGroupMessages($groupResponse, $fetchedAt) : [];
+        $fetched = count($personalMessages);
+        $fetchedGroups = count($groupMessages);
+        $allMessages = $this->dedupeMessages([...$personalMessages, ...$groupMessages]);
+
+        $initialized = $this->storage->getSetting('inbox_backend_initialized', '0') === '1';
+        $seeded = 0;
+        $ingested = 0;
         $delivered = 0;
-        $skipped = 0;
 
-        foreach ($messages as $message) {
-            $deliveryKey = (string) ($message['delivery_key'] ?? '');
-            $ackMessageId = (string) ($message['ack_message_id'] ?? '');
-            $ackGroupId = (string) ($message['ack_group_id'] ?? '');
-            $text = (string) ($message['text'] ?? '');
-            $isSystem = (bool) ($message['is_system'] ?? false);
-            $isGroupMessage = (bool) ($message['is_group_message'] ?? false);
-            $groupLabel = trim((string) ($message['group_label'] ?? ''));
+        if (!$initialized) {
+            foreach ($allMessages as $message) {
+                $this->storage->insertInboxBackendMessage($message, true, !empty($message['requires_ack']));
+                if (!empty($message['requires_ack'])) {
+                    $this->ackPersonalMessage($message);
+                }
+                $seeded++;
+            }
+            $this->storage->setSetting('inbox_backend_initialized', '1');
 
-            if ($deliveryKey === '' || $ackMessageId === '' || $text === '') {
-                $skipped++;
+            $this->logger?->info('Inbox backend initialized.', [
+                'fetched' => $fetched,
+                'fetched_groups' => $fetchedGroups,
+                'seeded' => $seeded,
+                'errors' => $fetchErrors,
+            ]);
+
+            return [
+                'ok' => true,
+                'fetched' => $fetched,
+                'fetched_groups' => $fetchedGroups,
+                'seeded' => $seeded,
+                'ingested' => 0,
+                'delivered' => 0,
+                'initialized' => true,
+                'errors' => $fetchErrors,
+            ];
+        }
+
+        foreach ($allMessages as $message) {
+            $messageKey = (string) ($message['message_key'] ?? '');
+            if ($messageKey === '' || $this->storage->hasInboxBackendMessage($messageKey)) {
                 continue;
             }
 
-            if ($this->storage->hasDeliveredInboxMessage($deliveryKey, $chatId)) {
-                $skipped++;
-                continue;
-            }
+            $this->storage->insertInboxBackendMessage($message);
+            $ingested++;
+        }
 
-            if ($isSystem) {
-                $telegramText = "System\n\n" . $text;
-            } elseif ($isGroupMessage) {
-                $telegramText = $groupLabel !== '' ? $groupLabel . "\n\n" . $text : $text;
-            } else {
-                $telegramText = $text;
-            }
+        $pendingMessages = $this->storage->listPendingInboxBackendMessages();
+        foreach ($pendingMessages as $message) {
+            $telegramText = $this->formatTelegramText($message);
             foreach ($this->splitter->split($telegramText) as $chunk) {
                 $this->telegramClient->sendMessage($chatId, $chunk);
             }
 
-            $this->storage->markInboxDelivered($deliveryKey, $chatId);
-            if ($ackGroupId !== '') {
-                $this->ghostClient->ackInbox($ackMessageId, $ackGroupId);
-            } else {
-                $this->ghostClient->ackInbox($ackMessageId);
+            $messageKey = (string) ($message['message_key'] ?? '');
+            if ($messageKey !== '') {
+                $this->storage->markInboxBackendDelivered($messageKey);
+                if (!empty($message['requires_ack'])) {
+                    $this->ackPersonalMessage($message);
+                    $this->storage->markInboxBackendAcked($messageKey);
+                }
+                $delivered++;
             }
-            $this->storage->markInboxAcked($deliveryKey, $chatId);
-            $delivered++;
         }
 
         $this->logger?->info('Inbox poller run completed.', [
             'fetched' => $fetched,
-            'fetched_configured_group' => $fetchedConfiguredGroup,
             'fetched_groups' => $fetchedGroups,
+            'ingested' => $ingested,
             'delivered' => $delivered,
-            'skipped' => $skipped,
+            'errors' => $fetchErrors,
         ]);
 
-        return ['ok' => true, 'fetched' => $fetched, 'fetched_configured_group' => $fetchedConfiguredGroup, 'fetched_groups' => $fetchedGroups, 'delivered' => $delivered, 'skipped' => $skipped];
+        return [
+            'ok' => true,
+            'fetched' => $fetched,
+            'fetched_groups' => $fetchedGroups,
+            'seeded' => 0,
+            'ingested' => $ingested,
+            'delivered' => $delivered,
+            'errors' => $fetchErrors,
+        ];
     }
 
-    private function extractInboxMessages(array $response, bool $isGroupResponse): array
+    private function extractPersonalMessages(array $response, int $fetchedAt): array
     {
         $messages = [];
         $items = $response['data']['items'] ?? $response['items'] ?? [];
-        if (is_array($items)) {
-            foreach ($items as $item) {
-                if (is_array($item)) {
-                    $fallbackGroupId = $isGroupResponse ? (string) ($item['group_id'] ?? '') : '';
-                    $fallbackGroupLabel = $isGroupResponse ? $this->extractGroupLabel($item, '') : '';
-                    $message = $this->normalizeInboxMessage($item, $fallbackGroupId, $fallbackGroupLabel);
-                    if ($message !== null) {
-                        $messages[] = $message;
-                    }
-                }
+        if (!is_array($items)) {
+            return [];
+        }
+        $total = count($items);
+
+        foreach ($items as $index => $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $sourceOrder = $total - (is_int($index) ? $index : 0);
+            $message = $this->normalizeMessage($item, 'personal', '', '', true, $fetchedAt, $sourceOrder);
+            if ($message !== null) {
+                $messages[] = $message;
             }
         }
 
-        $groups = $response['data']['groups'] ?? $response['groups'] ?? [];
-        if (is_array($groups)) {
-            foreach ($groups as $group) {
-                if (!is_array($group)) {
-                    continue;
-                }
-                $groupId = trim((string) ($group['group_id'] ?? ''));
-                $groupItems = $group['items'] ?? [];
-                if (!is_array($groupItems)) {
-                    continue;
-                }
-                $groupLabel = $this->extractGroupLabel($group, $groupId);
-                foreach ($groupItems as $item) {
-                    if (is_array($item)) {
-                        $message = $this->normalizeInboxMessage($item, $groupId, $groupLabel);
-                        if ($message !== null) {
-                            $messages[] = $message;
-                        }
-                    }
-                }
-            }
-        }
-
-        return $this->dedupeMessages($messages);
+        return $messages;
     }
 
-    private function normalizeInboxMessage(array $item, string $fallbackGroupId = '', string $fallbackGroupLabel = ''): ?array
+    private function extractGroupMessages(array $response, int $fetchedAt): array
     {
-        $ackMessageId = $this->normalizeMessageId($item);
-        $groupId = trim((string) ($item['group_id'] ?? $fallbackGroupId));
-        $groupLabel = $this->extractGroupLabel($item, $fallbackGroupLabel !== '' ? $fallbackGroupLabel : $groupId);
-        $text = $this->normalizeText($item);
+        $messages = [];
+        $items = $response['data']['items'] ?? $response['items'] ?? [];
+        if (!is_array($items)) {
+            return [];
+        }
+        $total = count($items);
 
-        if ($ackMessageId === '' || $text === '') {
-            $this->logger?->warning('Inbox item skipped because it did not contain a usable id or text.', ['item' => $item]);
+        foreach ($items as $index => $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $groupId = trim((string) ($item['group_id'] ?? $item['polled_group_id'] ?? ''));
+            $groupLabel = $this->extractGroupLabel($item, $groupId);
+            $sourceOrder = $total - (is_int($index) ? $index : 0);
+            $message = $this->normalizeMessage($item, 'group_merged', $groupId, $groupLabel, false, $fetchedAt, $sourceOrder);
+            if ($message !== null) {
+                $messages[] = $message;
+            }
+        }
+
+        return $messages;
+    }
+
+    private function normalizeMessage(
+        array $item,
+        string $source,
+        string $groupId,
+        string $groupLabel,
+        bool $requiresAck,
+        int $fetchedAt,
+        int $sourceIndex
+    ): ?array {
+        $messageId = $this->normalizeMessageId($item);
+        $text = $this->normalizeText($item);
+        if ($messageId === '' || $text === '') {
+            $this->logger?->warning('Inbox item skipped because it did not contain a usable id or text.', ['item' => $item, 'source' => $source]);
             return null;
         }
 
+        $timestamp = $this->normalizeTimestamp($item);
+        $messageKey = $source . ':' . ($groupId !== '' ? $groupId . ':' : '') . $messageId;
+
         return [
-            'delivery_key' => ($groupId !== '' ? 'group:' . $groupId . ':' : 'ghost:') . $ackMessageId,
-            'ack_message_id' => $ackMessageId,
-            'ack_group_id' => $groupId,
+            'source' => $source,
+            'message_key' => $messageKey,
+            'message_id' => $messageId,
+            'group_id' => $groupId,
+            'group_label' => $groupLabel,
             'text' => $text,
             'is_system' => $this->isSystemMessage($item),
-            'is_group_message' => $groupId !== '',
-            'group_label' => $groupLabel,
+            'requires_ack' => $requiresAck,
+            'sort_ts' => $timestamp['iso'],
+            'sort_unix' => $timestamp['unix'],
+            'fetched_at' => ($fetchedAt * 1000) + $sourceIndex,
         ];
+    }
+
+    private function formatTelegramText(array $message): string
+    {
+        $text = trim((string) ($message['text'] ?? ''));
+        $source = trim((string) ($message['source'] ?? 'personal'));
+        $groupLabel = trim((string) ($message['group_label'] ?? ''));
+        $isSystem = !empty($message['is_system']);
+
+        if ($text === '') {
+            return '';
+        }
+
+        if ($isSystem) {
+            return "System\n\n" . $text;
+        }
+
+        if ($source === 'group_merged' && $groupLabel !== '') {
+            return $groupLabel . "\n\n" . $text;
+        }
+
+        return $text;
+    }
+
+    private function ackPersonalMessage(array $message): void
+    {
+        $messageId = trim((string) ($message['message_id'] ?? ''));
+        if ($messageId === '') {
+            return;
+        }
+
+        $this->ghostClient->ackInbox($messageId);
+    }
+
+    private function dedupeMessages(array $messages): array
+    {
+        $seen = [];
+        $deduped = [];
+        foreach ($messages as $message) {
+            $key = (string) ($message['message_key'] ?? '');
+            if ($key === '' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $deduped[] = $message;
+        }
+
+        return $deduped;
     }
 
     private function extractGroupLabel(array $item, string $fallback = ''): string
@@ -186,22 +297,6 @@ final class InboxPoller
         }
 
         return trim($fallback);
-    }
-
-    private function dedupeMessages(array $messages): array
-    {
-        $seen = [];
-        $deduped = [];
-        foreach ($messages as $message) {
-            $key = (string) ($message['delivery_key'] ?? '');
-            if ($key === '' || isset($seen[$key])) {
-                continue;
-            }
-            $seen[$key] = true;
-            $deduped[] = $message;
-        }
-
-        return $deduped;
     }
 
     private function normalizeText(array $item): string
@@ -314,6 +409,60 @@ final class InboxPoller
         }
 
         return '';
+    }
+
+    private function normalizeTimestamp(array $item): array
+    {
+        foreach ([
+            ['created_at'],
+            ['message_ts'],
+            ['timestamp'],
+            ['ts'],
+            ['sent_at'],
+            ['published_at'],
+            ['data', 'created_at'],
+            ['data', 'message_ts'],
+            ['data', 'timestamp'],
+            ['data', 'ts'],
+            ['payload', 'created_at'],
+            ['payload', 'message_ts'],
+            ['payload', 'timestamp'],
+            ['payload', 'ts'],
+        ] as $path) {
+            $value = $this->readPath($item, $path);
+            $normalized = $this->parseTimestamp($value);
+            if ($normalized !== null) {
+                return $normalized;
+            }
+        }
+
+        return ['iso' => null, 'unix' => null];
+    }
+
+    private function parseTimestamp(mixed $value): ?array
+    {
+        if (is_int($value) || is_float($value) || (is_string($value) && preg_match('/^\d+$/', trim($value)) === 1)) {
+            $unix = (int) $value;
+            if ($unix > 0) {
+                return ['iso' => gmdate('c', $unix), 'unix' => $unix];
+            }
+        }
+
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        $unix = strtotime($value);
+        if ($unix === false || $unix <= 0) {
+            return null;
+        }
+
+        return ['iso' => gmdate('c', $unix), 'unix' => $unix];
     }
 
     private function readNestedString(array $item, array $path): string

@@ -686,6 +686,19 @@ Both endpoints are secret-protected. If you open them without the correct `?key=
 
 Status is for private diagnostics only.
 
+### Maintenance Gives You
+
+The private `maintenance.php?key=...` page can:
+
+- unpair the current Telegram owner
+- generate a new pairing code
+- switch Ghost API base, JWT, or default group
+- delete the Telegram webhook
+- reset only the connector-local inbox backend
+- factory-reset the whole connector
+
+Use `Reset Local Inbox Backend` when telmi OS remains the source of truth and you want the connector to restart inbox tracking without reinstalling or re-pairing.
+
 ## What Stays Private
 
 Never publish:

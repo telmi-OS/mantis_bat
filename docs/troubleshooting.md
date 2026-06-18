@@ -33,9 +33,9 @@
 - confirm cron key for URL mode
 - confirm inbox endpoint returns items
 - confirm `/inbox_groups` is reachable for the same Ghost JWT
-- call `cron.php?key=...` manually once and inspect `fetched`, `delivered`, and `skipped`
-- inspect `fetched_groups` as well when using group-driven Ghost work
-- if `fetched > 0` and `delivered = 0`, inspect connector logs because inbox items may not match the expected text/id shape
+- call `cron.php?key=...` manually once and inspect `fetched`, `fetched_groups`, `seeded`, `ingested`, and `delivered`
+- on the first successful run, `seeded > 0` with `delivered = 0` is expected because the connector is establishing its baseline
+- if later runs show `ingested > 0` and `delivered = 0`, inspect connector logs because Telegram delivery or local inbox state may be failing
 
 ## Status Or Health Returns Not Found
 
@@ -53,4 +53,5 @@ It supports:
 - generate a fresh pairing code
 - switch Ghost API base / JWT / default group
 - delete Telegram webhook
+- reset only the local inbox backend
 - factory reset the connector

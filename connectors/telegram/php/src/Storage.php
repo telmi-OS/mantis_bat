@@ -34,6 +34,7 @@ final class Storage
             'CREATE TABLE IF NOT EXISTS pairing_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT \'pending\', telegram_user_id TEXT, telegram_chat_id TEXT, telegram_username TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)',
             'CREATE TABLE IF NOT EXISTS telegram_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_user_id TEXT NOT NULL UNIQUE, telegram_chat_id TEXT NOT NULL, username TEXT, first_name TEXT, last_name TEXT, status TEXT NOT NULL DEFAULT \'active\', created_at INTEGER NOT NULL, verified_at INTEGER NOT NULL, revoked_at INTEGER)',
             'CREATE TABLE IF NOT EXISTS delivered_inbox_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, ghost_message_id TEXT NOT NULL, telegram_chat_id TEXT NOT NULL, delivered_at INTEGER NOT NULL, acked_at INTEGER, UNIQUE(ghost_message_id, telegram_chat_id))',
+            'CREATE TABLE IF NOT EXISTS inbox_backend_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, message_key TEXT NOT NULL UNIQUE, message_id TEXT NOT NULL, group_id TEXT, group_label TEXT, text TEXT NOT NULL, is_system INTEGER NOT NULL DEFAULT 0, requires_ack INTEGER NOT NULL DEFAULT 0, sort_ts TEXT, sort_unix INTEGER, fetched_at INTEGER NOT NULL, delivered_at INTEGER, acked_at INTEGER)',
             'CREATE TABLE IF NOT EXISTS inbound_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_update_id TEXT, telegram_message_id TEXT, telegram_user_id TEXT, telegram_chat_id TEXT, message_type TEXT NOT NULL, text TEXT, command TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL)',
             'CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, level TEXT NOT NULL, message TEXT NOT NULL, context_json TEXT, created_at INTEGER NOT NULL)',
             'CREATE TABLE IF NOT EXISTS request_limits (bucket TEXT NOT NULL, subject TEXT NOT NULL, count INTEGER NOT NULL, reset_at INTEGER NOT NULL, PRIMARY KEY(bucket, subject))',
@@ -158,7 +159,24 @@ final class Storage
             $this->pdo->exec('DELETE FROM telegram_accounts');
             $this->pdo->exec('DELETE FROM pairing_codes');
             $this->pdo->exec('DELETE FROM delivered_inbox_messages');
+            $this->pdo->exec('DELETE FROM inbox_backend_messages');
             $this->pdo->exec('DELETE FROM inbound_messages');
+            $this->pdo->commit();
+        } catch (\Throwable $exception) {
+            $this->pdo->rollBack();
+            throw $exception;
+        }
+    }
+
+    public function resetInboxBackend(): void
+    {
+        $this->pdo->beginTransaction();
+
+        try {
+            $this->pdo->exec('DELETE FROM inbox_backend_messages');
+            $this->pdo->exec('DELETE FROM delivered_inbox_messages');
+            $stmt = $this->pdo->prepare('DELETE FROM settings WHERE key = :key');
+            $stmt->execute([':key' => 'inbox_backend_initialized']);
             $this->pdo->commit();
         } catch (\Throwable $exception) {
             $this->pdo->rollBack();
@@ -219,6 +237,89 @@ final class Storage
             ':ghost_message_id' => $ghostMessageId,
             ':telegram_chat_id' => $telegramChatId,
         ]);
+    }
+
+    public function hasInboxBackendMessages(): bool
+    {
+        $stmt = $this->pdo->query('SELECT 1 FROM inbox_backend_messages LIMIT 1');
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function hasInboxBackendMessage(string $messageKey): bool
+    {
+        $stmt = $this->pdo->prepare('SELECT 1 FROM inbox_backend_messages WHERE message_key = :message_key LIMIT 1');
+        $stmt->execute([':message_key' => $messageKey]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function insertInboxBackendMessage(array $message, bool $markDelivered = false, bool $markAcked = false): void
+    {
+        $now = time();
+        $stmt = $this->pdo->prepare(
+            'INSERT OR IGNORE INTO inbox_backend_messages (
+                source, message_key, message_id, group_id, group_label, text, is_system, requires_ack, sort_ts, sort_unix, fetched_at, delivered_at, acked_at
+            ) VALUES (
+                :source, :message_key, :message_id, :group_id, :group_label, :text, :is_system, :requires_ack, :sort_ts, :sort_unix, :fetched_at, :delivered_at, :acked_at
+            )'
+        );
+        $stmt->execute([
+            ':source' => (string) ($message['source'] ?? 'personal'),
+            ':message_key' => (string) ($message['message_key'] ?? ''),
+            ':message_id' => (string) ($message['message_id'] ?? ''),
+            ':group_id' => $this->normalizeNullableString($message['group_id'] ?? null),
+            ':group_label' => $this->normalizeNullableString($message['group_label'] ?? null),
+            ':text' => (string) ($message['text'] ?? ''),
+            ':is_system' => !empty($message['is_system']) ? 1 : 0,
+            ':requires_ack' => !empty($message['requires_ack']) ? 1 : 0,
+            ':sort_ts' => $this->normalizeNullableString($message['sort_ts'] ?? null),
+            ':sort_unix' => isset($message['sort_unix']) && is_int($message['sort_unix']) ? $message['sort_unix'] : null,
+            ':fetched_at' => isset($message['fetched_at']) && is_int($message['fetched_at']) ? $message['fetched_at'] : $now,
+            ':delivered_at' => $markDelivered ? $now : null,
+            ':acked_at' => $markAcked ? $now : null,
+        ]);
+    }
+
+    public function listPendingInboxBackendMessages(): array
+    {
+        $stmt = $this->pdo->query(
+            'SELECT * FROM inbox_backend_messages
+             WHERE delivered_at IS NULL
+             ORDER BY
+                 CASE WHEN sort_unix IS NULL THEN 1 ELSE 0 END ASC,
+                 sort_unix ASC,
+                 fetched_at ASC,
+                 id ASC'
+        );
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function markInboxBackendDelivered(string $messageKey): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE inbox_backend_messages SET delivered_at = :delivered_at WHERE message_key = :message_key');
+        $stmt->execute([
+            ':delivered_at' => time(),
+            ':message_key' => $messageKey,
+        ]);
+    }
+
+    public function markInboxBackendAcked(string $messageKey): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE inbox_backend_messages SET acked_at = :acked_at WHERE message_key = :message_key');
+        $stmt->execute([
+            ':acked_at' => time(),
+            ':message_key' => $messageKey,
+        ]);
+    }
+
+    private function normalizeNullableString(mixed $value): ?string
+    {
+        if (!is_string($value) && !is_numeric($value)) {
+            return null;
+        }
+
+        $normalized = trim((string) $value);
+        return $normalized === '' ? null : $normalized;
     }
 
     public function hitRateLimit(string $bucket, string $subject, int $limit, int $windowSeconds): bool

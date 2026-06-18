@@ -58,7 +58,24 @@ Yes. Use the private `pairing.php?key=...` URL created by the installer to mint 
 
 ## Can I unpair, switch Ghost, or reset the connector?
 
-Yes. Use the private `maintenance.php?key=...` URL. It supports unpairing, Ghost credential changes, webhook deletion, and full factory reset.
+Yes. Use the private `maintenance.php?key=...` URL. It supports unpairing, Ghost credential changes, webhook deletion, local inbox backend reset, and full factory reset.
+
+## Can I restart the connector inbox state without reinstalling?
+
+Yes. Use the maintenance action `Reset Local Inbox Backend`.
+
+It clears only:
+
+- the connector-local inbox cache
+- local delivery markers
+- the inbox baseline flag
+
+It keeps:
+
+- pairing
+- Ghost config
+- Telegram webhook setup
+- the rest of the runtime
 
 ## Will other channels be supported?
 

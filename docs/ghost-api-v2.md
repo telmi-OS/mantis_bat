@@ -148,12 +148,19 @@ Ghost API v2 also exposes:
 
 This returns merged inbox rows across the Ghost's current active group memberships, excluding the personal/default inbox.
 
+Current runtime behavior note:
+
+- top-level `items` are already merged newest-first
+- `limit` is applied per group, not globally
+- group rows are not acknowledged by this endpoint
+- the connector therefore keeps its own local dedupe and ordering state in SQLite
+
 The Telegram connector cron now polls:
 
 - `GET /inbox`
 - `GET /inbox_groups`
 
-and fans both sources out into the same Telegram chat.
+and merges both sources into one local inbox backend before sending anything to Telegram.
 
 ## Ack Shape
 

@@ -28,9 +28,11 @@ https://example.com/mantis-bat/public/cron.php?key=CRON_SECRET
 - require key for HTTP execution
 - prevent overlapping runs with a lock file
 - skip delivery when no paired owner exists
-- avoid duplicate delivery by tracking delivered inbox messages
-- poll both personal Ghost inbox and active-group inbox
-- acknowledge inbox items only after successful Telegram delivery
+- poll personal `/inbox` and merged `/inbox_groups`
+- keep a local SQLite inbox backend for dedupe and ordering
+- seed the backend on first poll so old history is not replayed into Telegram
+- acknowledge personal inbox items only after successful Telegram delivery
+- never acknowledge merged group inbox rows from `/inbox_groups`
 
 Without a working cron, Telegram users can send messages to Ghost, but they will not receive the later queued reply.
 
@@ -44,7 +46,8 @@ Current cron JSON includes counters such as:
 
 - `fetched`
 - `fetched_groups`
+- `seeded`
+- `ingested`
 - `delivered`
-- `skipped`
 
-That makes it easier to tell whether the inbox is empty or whether inbox items were returned but could not be delivered.
+That makes it easier to tell whether the connector only initialized its baseline, discovered new inbox rows, or actually flushed messages to Telegram.
