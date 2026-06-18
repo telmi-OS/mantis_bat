@@ -30,4 +30,5 @@ echo json_encode([
     'ghost_configured' => (string) $config->get('ghost.api_token', '') !== '',
     'paired' => $owner !== null,
     'version' => $config->get('app.version', '0.1.0'),
+    'build' => $config->buildFingerprint(),
 ], JSON_UNESCAPED_SLASHES);

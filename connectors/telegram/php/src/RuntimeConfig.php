@@ -10,6 +10,7 @@ final class RuntimeConfig
 {
     private string $configPath;
     private array $data;
+    private ?string $buildFingerprint = null;
 
     public function __construct(string $configPath)
     {
@@ -73,6 +74,7 @@ final class RuntimeConfig
                 'base_url' => $this->get('app.base_url'),
                 'timezone' => $this->get('app.timezone'),
                 'version' => $this->get('app.version', '0.1.0'),
+                'build' => $this->buildFingerprint(),
             ],
             'telegram' => [
                 'configured' => (string) $this->get('telegram.bot_token', '') !== '',
@@ -87,6 +89,36 @@ final class RuntimeConfig
                 'default_group_id' => $this->get('ghost.default_group_id'),
             ],
         ];
+    }
+
+    public function buildFingerprint(): string
+    {
+        if ($this->buildFingerprint !== null) {
+            return $this->buildFingerprint;
+        }
+
+        $moduleRoot = dirname($this->configPath);
+        $sources = [
+            $moduleRoot . '/src/InboxPoller.php',
+            $moduleRoot . '/src/ChatHandler.php',
+            $moduleRoot . '/src/GhostClient.php',
+            $moduleRoot . '/src/CommandRouter.php',
+            $moduleRoot . '/src/bootstrap.php',
+            $moduleRoot . '/public/cron.php',
+            $moduleRoot . '/public/health.php',
+            $moduleRoot . '/public/maintenance.php',
+            $moduleRoot . '/public/webhook.php',
+        ];
+
+        $parts = [(string) $this->get('app.version', '0.1.0')];
+        foreach ($sources as $path) {
+            if (is_file($path)) {
+                $parts[] = basename($path) . ':' . sha1_file($path);
+            }
+        }
+
+        $this->buildFingerprint = substr(sha1(implode('|', $parts)), 0, 12);
+        return $this->buildFingerprint;
     }
 
     private function load(): array

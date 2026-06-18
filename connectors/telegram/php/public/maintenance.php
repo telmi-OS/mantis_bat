@@ -158,6 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </div>
         <p class="copy">Use this protected page to manage the live Telegram connector without reinstalling unless you actually want a full reset.</p>
+        <p class="copy"><strong>Version:</strong> <?= htmlspecialchars((string) $config->get('app.version', '0.1.0'), ENT_QUOTES, 'UTF-8') ?> <strong>Build:</strong> <?= htmlspecialchars($config->buildFingerprint(), ENT_QUOTES, 'UTF-8') ?></p>
     </section>
 
     <div class="card-grid">
