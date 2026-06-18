@@ -42,6 +42,7 @@ final class InboxPoller
             $text = (string) ($message['text'] ?? '');
             $isSystem = (bool) ($message['is_system'] ?? false);
             $isGroupMessage = (bool) ($message['is_group_message'] ?? false);
+            $groupLabel = trim((string) ($message['group_label'] ?? ''));
 
             if ($deliveryKey === '' || $ackMessageId === '' || $text === '') {
                 $skipped++;
@@ -56,7 +57,7 @@ final class InboxPoller
             if ($isSystem) {
                 $telegramText = "System\n\n" . $text;
             } elseif ($isGroupMessage) {
-                $telegramText = "Group inbox\n\n" . $text;
+                $telegramText = $groupLabel !== '' ? $groupLabel . "\n\n" . $text : $text;
             } else {
                 $telegramText = $text;
             }
@@ -91,7 +92,9 @@ final class InboxPoller
         if (is_array($items)) {
             foreach ($items as $item) {
                 if (is_array($item)) {
-                    $message = $this->normalizeInboxMessage($item, $isGroupResponse ? (string) ($item['group_id'] ?? '') : '');
+                    $fallbackGroupId = $isGroupResponse ? (string) ($item['group_id'] ?? '') : '';
+                    $fallbackGroupLabel = $isGroupResponse ? $this->extractGroupLabel($item, '') : '';
+                    $message = $this->normalizeInboxMessage($item, $fallbackGroupId, $fallbackGroupLabel);
                     if ($message !== null) {
                         $messages[] = $message;
                     }
@@ -110,9 +113,10 @@ final class InboxPoller
                 if (!is_array($groupItems)) {
                     continue;
                 }
+                $groupLabel = $this->extractGroupLabel($group, $groupId);
                 foreach ($groupItems as $item) {
                     if (is_array($item)) {
-                        $message = $this->normalizeInboxMessage($item, $groupId);
+                        $message = $this->normalizeInboxMessage($item, $groupId, $groupLabel);
                         if ($message !== null) {
                             $messages[] = $message;
                         }
@@ -124,10 +128,11 @@ final class InboxPoller
         return $this->dedupeMessages($messages);
     }
 
-    private function normalizeInboxMessage(array $item, string $fallbackGroupId = ''): ?array
+    private function normalizeInboxMessage(array $item, string $fallbackGroupId = '', string $fallbackGroupLabel = ''): ?array
     {
         $ackMessageId = $this->normalizeMessageId($item);
         $groupId = trim((string) ($item['group_id'] ?? $fallbackGroupId));
+        $groupLabel = $this->extractGroupLabel($item, $fallbackGroupLabel !== '' ? $fallbackGroupLabel : $groupId);
         $text = $this->normalizeText($item);
 
         if ($ackMessageId === '' || $text === '') {
@@ -142,7 +147,39 @@ final class InboxPoller
             'text' => $text,
             'is_system' => $this->isSystemMessage($item),
             'is_group_message' => $groupId !== '',
+            'group_label' => $groupLabel,
         ];
+    }
+
+    private function extractGroupLabel(array $item, string $fallback = ''): string
+    {
+        foreach ([
+            ['group_name'],
+            ['group_title'],
+            ['group_label'],
+            ['name'],
+            ['title'],
+            ['group', 'name'],
+            ['group', 'title'],
+            ['group', 'label'],
+            ['data', 'group_name'],
+            ['data', 'group_title'],
+            ['data', 'group_label'],
+            ['data', 'group', 'name'],
+            ['data', 'group', 'title'],
+            ['payload', 'group_name'],
+            ['payload', 'group_title'],
+            ['payload', 'group_label'],
+            ['payload', 'group', 'name'],
+            ['payload', 'group', 'title'],
+        ] as $path) {
+            $value = $this->readNestedString($item, $path);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return trim($fallback);
     }
 
     private function dedupeMessages(array $messages): array
