@@ -19,51 +19,138 @@ final class InboxPoller
     {
         $owner = $this->storage->getAuthorizedOwner();
         if ($owner === null) {
-            return ['ok' => true, 'fetched' => 0, 'delivered' => 0, 'skipped' => 0, 'reason' => 'no_owner'];
+            return ['ok' => true, 'fetched' => 0, 'fetched_groups' => 0, 'delivered' => 0, 'skipped' => 0, 'reason' => 'no_owner'];
         }
 
         $chatId = (string) $owner['telegram_chat_id'];
-        $response = $this->ghostClient->pullInbox();
-        $items = $response['data']['items'] ?? $response['items'] ?? [];
-        if (!is_array($items)) {
-            $items = [];
-        }
+        $personalResponse = $this->ghostClient->pullInbox();
+        $groupResponse = $this->ghostClient->pullInboxGroups();
+        $messages = [
+            ...$this->extractInboxMessages($personalResponse, false),
+            ...$this->extractInboxMessages($groupResponse, true),
+        ];
 
-        $fetched = count($items);
+        $fetched = count($personalResponse['data']['items'] ?? $personalResponse['items'] ?? []);
+        $fetchedGroups = count($groupResponse['data']['items'] ?? $groupResponse['items'] ?? []);
         $delivered = 0;
         $skipped = 0;
-        foreach ($items as $item) {
-            if (!is_array($item)) {
+
+        foreach ($messages as $message) {
+            $deliveryKey = (string) ($message['delivery_key'] ?? '');
+            $ackMessageId = (string) ($message['ack_message_id'] ?? '');
+            $ackGroupId = (string) ($message['ack_group_id'] ?? '');
+            $text = (string) ($message['text'] ?? '');
+            $isSystem = (bool) ($message['is_system'] ?? false);
+
+            if ($deliveryKey === '' || $ackMessageId === '' || $text === '') {
                 $skipped++;
                 continue;
             }
 
-            $messageId = $this->normalizeMessageId($item);
-            $text = $this->normalizeText($item);
-            if ($messageId === '' || $text === '') {
-                $skipped++;
-                $this->logger?->warning('Inbox item skipped because it did not contain a usable id or text.', ['item' => $item]);
-                continue;
-            }
-
-            if ($this->storage->hasDeliveredInboxMessage($messageId, $chatId)) {
+            if ($this->storage->hasDeliveredInboxMessage($deliveryKey, $chatId)) {
                 $skipped++;
                 continue;
             }
 
-            foreach ($this->splitter->split("Ghost inbox\n\n" . $text) as $chunk) {
+            $telegramText = $isSystem ? "System\n\n" . $text : $text;
+            foreach ($this->splitter->split($telegramText) as $chunk) {
                 $this->telegramClient->sendMessage($chatId, $chunk);
             }
 
-            $this->storage->markInboxDelivered($messageId, $chatId);
-            $this->ghostClient->ackInbox($messageId);
-            $this->storage->markInboxAcked($messageId, $chatId);
+            $this->storage->markInboxDelivered($deliveryKey, $chatId);
+            if ($ackGroupId !== '') {
+                $this->ghostClient->ackInbox($ackMessageId, $ackGroupId);
+            } else {
+                $this->ghostClient->ackInbox($ackMessageId);
+            }
+            $this->storage->markInboxAcked($deliveryKey, $chatId);
             $delivered++;
         }
 
-        $this->logger?->info('Inbox poller run completed.', ['fetched' => $fetched, 'delivered' => $delivered, 'skipped' => $skipped]);
+        $this->logger?->info('Inbox poller run completed.', [
+            'fetched' => $fetched,
+            'fetched_groups' => $fetchedGroups,
+            'delivered' => $delivered,
+            'skipped' => $skipped,
+        ]);
 
-        return ['ok' => true, 'fetched' => $fetched, 'delivered' => $delivered, 'skipped' => $skipped];
+        return ['ok' => true, 'fetched' => $fetched, 'fetched_groups' => $fetchedGroups, 'delivered' => $delivered, 'skipped' => $skipped];
+    }
+
+    private function extractInboxMessages(array $response, bool $isGroupResponse): array
+    {
+        $messages = [];
+        $items = $response['data']['items'] ?? $response['items'] ?? [];
+        if (is_array($items)) {
+            foreach ($items as $item) {
+                if (is_array($item)) {
+                    $message = $this->normalizeInboxMessage($item, $isGroupResponse ? (string) ($item['group_id'] ?? '') : '');
+                    if ($message !== null) {
+                        $messages[] = $message;
+                    }
+                }
+            }
+        }
+
+        $groups = $response['data']['groups'] ?? $response['groups'] ?? [];
+        if (is_array($groups)) {
+            foreach ($groups as $group) {
+                if (!is_array($group)) {
+                    continue;
+                }
+                $groupId = trim((string) ($group['group_id'] ?? ''));
+                $groupItems = $group['items'] ?? [];
+                if (!is_array($groupItems)) {
+                    continue;
+                }
+                foreach ($groupItems as $item) {
+                    if (is_array($item)) {
+                        $message = $this->normalizeInboxMessage($item, $groupId);
+                        if ($message !== null) {
+                            $messages[] = $message;
+                        }
+                    }
+                }
+            }
+        }
+
+        return $this->dedupeMessages($messages);
+    }
+
+    private function normalizeInboxMessage(array $item, string $fallbackGroupId = ''): ?array
+    {
+        $ackMessageId = $this->normalizeMessageId($item);
+        $groupId = trim((string) ($item['group_id'] ?? $fallbackGroupId));
+        $text = $this->normalizeText($item);
+
+        if ($ackMessageId === '' || $text === '') {
+            $this->logger?->warning('Inbox item skipped because it did not contain a usable id or text.', ['item' => $item]);
+            return null;
+        }
+
+        return [
+            'delivery_key' => ($groupId !== '' ? 'group:' . $groupId . ':' : 'ghost:') . $ackMessageId,
+            'ack_message_id' => $ackMessageId,
+            'ack_group_id' => $groupId,
+            'text' => $text,
+            'is_system' => $this->isSystemMessage($item),
+        ];
+    }
+
+    private function dedupeMessages(array $messages): array
+    {
+        $seen = [];
+        $deduped = [];
+        foreach ($messages as $message) {
+            $key = (string) ($message['delivery_key'] ?? '');
+            if ($key === '' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $deduped[] = $message;
+        }
+
+        return $deduped;
     }
 
     private function normalizeText(array $item): string
@@ -88,6 +175,29 @@ final class InboxPoller
         }
 
         return '';
+    }
+
+    private function isSystemMessage(array $item): bool
+    {
+        foreach ([
+            ['type'],
+            ['kind'],
+            ['role'],
+            ['source'],
+            ['data', 'type'],
+            ['data', 'kind'],
+            ['data', 'role'],
+            ['payload', 'type'],
+            ['payload', 'kind'],
+            ['payload', 'role'],
+        ] as $path) {
+            $value = mb_strtolower($this->readNestedString($item, $path));
+            if (in_array($value, ['system', 'notice', 'warning', 'info', 'ack', 'queued', 'status'], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function normalizeMessageId(array $item): string

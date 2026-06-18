@@ -18,6 +18,7 @@ Behavior:
 
 - the connector sends the message to `POST /chat`
 - it sets queued mode
+- it enables history in the request payload
 - it does not wait for the final assistant reply in the webhook request
 - the later Ghost answer is delivered through inbox polling
 
@@ -55,8 +56,9 @@ Current response includes:
 - Telegram connected
 - Ghost API configured
 - chat mode queued
+- history enabled
 - paired owner label
-- cron inbox availability
+- cron inbox availability for ghost + groups
 - memory command availability
 - version
 

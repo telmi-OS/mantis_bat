@@ -84,7 +84,9 @@ It sits between:
 That means:
 
 - Telegram messages go to your Ghost through your connector in queued mode
+- Telegram chat requests include history context
 - Ghost replies come back through inbox polling
+- active group inbox rows can also come back through cron polling
 - proactive Ghost inbox messages can also come back to Telegram
 - you stay in control of the bot token and hosting path
 
@@ -558,6 +560,11 @@ This is required for Ghost inbox polling.
 
 It is also required for normal Ghost chat replies in the current Telegram connector, because chat uses queued mode.
 
+Cron also polls:
+
+- the Ghost personal/default inbox through `/inbox`
+- the active-group inbox stream through `/inbox/groups`
+
 ### Preferred: CLI Cron
 
 Example:
@@ -603,6 +610,7 @@ Expected behavior:
 - your connector validates the webhook secret
 - your connector verifies you are the paired owner
 - your connector calls `POST /chat` in queued mode
+- your connector sends history enabled
 - Ghost API acknowledges the request
 - the later Ghost reply is delivered back to Telegram through cron inbox polling
 
@@ -613,6 +621,8 @@ Runtime note:
 - the ideal Ghost API v2 queued flow is later inbox delivery
 - some live runtimes may still return the answer inline even with `mode: queued`
 - the connector now forwards that inline reply as a fallback
+- plain Ghost replies are sent to Telegram without a `Ghost Inbox` label
+- labeled `System` messages are reserved for acknowledgements or system-style notices
 
 ### What To Do If Nothing Comes Back
 

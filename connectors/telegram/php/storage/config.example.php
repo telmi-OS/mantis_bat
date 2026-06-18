@@ -26,6 +26,7 @@ return [
         'paths' => [
             'chat' => '/chat',
             'inbox' => '/inbox',
+            'inbox_groups' => '/inbox/groups',
             'inbox_ack' => '/inbox/ack',
             'memory_upsert' => '/memory/upsert',
             'memory_list' => '/memory/list',

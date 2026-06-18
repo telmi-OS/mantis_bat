@@ -52,12 +52,15 @@ Current connector request shape:
 {
   "message": "Hello from Telegram",
   "mode": "queued",
+  "history": true,
+  "use_history": true,
   "meta": {
     "source": "mantis_bat",
     "channel": "telegram"
   },
   "options": {
-    "mode": "queued"
+    "mode": "queued",
+    "use_history": true
   }
 }
 ```
@@ -83,7 +86,9 @@ Ghost API v2 chat supports queued execution.
 For queued use:
 
 - send `mode: queued`
+- send `history: true` or `use_history: true` when you want live history context
 - or send `options.mode: queued`
+- or send `options.use_history: true`
 - `/chat` returns an acknowledgement
 - collect the later assistant response through `/inbox`
 
@@ -134,6 +139,21 @@ The connector normalizes both container positions and then checks likely reply-b
 - `reply`
 - nested `data.*`
 - nested `payload.*`
+
+## Group Inbox Polling
+
+Ghost API v2 also exposes:
+
+- `GET /inbox/groups`
+
+This returns merged inbox rows across the Ghost's current active group memberships, excluding the personal/default inbox.
+
+The Telegram connector cron now polls:
+
+- `GET /inbox`
+- `GET /inbox/groups`
+
+and fans both sources out into the same Telegram chat.
 
 ## Ack Shape
 

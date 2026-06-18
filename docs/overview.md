@@ -35,7 +35,8 @@ The repository is shaped as a connector framework, and this is what is public to
 - one Telegram PHP connector module in `connectors/telegram/php/`
 - one private paired Telegram owner
 - Ghost chat submission through `POST /chat` in queued mode
-- Ghost inbox polling through cron for replies and proactive delivery
+- Ghost chat history enabled in the request payload
+- Ghost inbox polling through cron for replies, proactive delivery, and active-group inbox fan-out
 - memory upload through `bat_memory_up:`
 - pairing recovery through `pairing.php`
 - protected maintenance actions through `maintenance.php`
@@ -46,7 +47,8 @@ Core flows:
 2. Authorized user message is routed to Ghost API v2 in queued mode
 3. `/chat` returns an acknowledgement instead of the final assistant reply
 4. Ghost inbox polling sends the later assistant reply back to Telegram
-5. The same inbox polling flow can also deliver proactive Ghost follow-ups
+5. The same cron loop also polls `/inbox/groups` for current active group inbox rows
+6. System acknowledgements can be surfaced to Telegram as labeled system notices
 
 Current command support:
 
@@ -78,6 +80,7 @@ When Telegram is connected to a properly configured Ghost, the connector can use
 - queued conversational submission through `/chat`
 - memory upload through `/memory/upsert`
 - Ghost reply delivery through `/inbox`
+- group reply delivery through `/inbox/groups`
 - proactive updates through `/inbox`
 - group-aware prompts when `group_id` is allowed by token
 - action-capable Ghost behavior only if the Ghost itself is configured for that on the telmi OS side

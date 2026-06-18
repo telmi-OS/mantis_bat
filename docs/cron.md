@@ -8,6 +8,7 @@ In the current Telegram connector, that inbox flow is responsible for:
 
 - normal Ghost chat replies
 - proactive Ghost messages
+- active-group inbox delivery through `/inbox/groups`
 
 ## CLI Cron
 
@@ -28,6 +29,7 @@ https://example.com/mantis-bat/public/cron.php?key=CRON_SECRET
 - prevent overlapping runs with a lock file
 - skip delivery when no paired owner exists
 - avoid duplicate delivery by tracking delivered inbox messages
+- poll both personal Ghost inbox and active-group inbox
 - acknowledge inbox items only after successful Telegram delivery
 
 Without a working cron, Telegram users can send messages to Ghost, but they will not receive the later queued reply.
@@ -41,6 +43,7 @@ Exception:
 Current cron JSON includes counters such as:
 
 - `fetched`
+- `fetched_groups`
 - `delivered`
 - `skipped`
 

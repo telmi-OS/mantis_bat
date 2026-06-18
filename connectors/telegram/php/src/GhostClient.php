@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MantisBat;
 
+use RuntimeException;
+
 final class GhostClient
 {
     public function __construct(
@@ -15,10 +17,13 @@ final class GhostClient
     public function chat(string $message, array $options = []): array
     {
         $options['mode'] = 'queued';
+        $options['use_history'] = true;
 
         $payload = [
             'message' => $message,
             'mode' => 'queued',
+            'history' => true,
+            'use_history' => true,
             'meta' => [
                 'source' => 'mantis_bat',
                 'channel' => 'telegram',
@@ -86,10 +91,16 @@ final class GhostClient
         ]);
     }
 
-    public function ackInbox(string $messageId): array
+    public function pullInboxGroups(): array
+    {
+        return $this->request('GET', (string) $this->config->get('ghost.paths.inbox_groups', '/inbox/groups'), [], [
+            'limit' => (int) $this->config->get('limits.cron_batch_size', 20),
+        ]);
+    }
+
+    public function ackInbox(string $messageId, ?string $groupId = null): array
     {
         $payload = ['message_id' => $messageId];
-        $groupId = $this->config->get('ghost.default_group_id', '');
         if ($groupId !== '') {
             $payload['group_id'] = $groupId;
         }

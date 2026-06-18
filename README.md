@@ -79,8 +79,10 @@ Current operational pages include:
 Current Telegram delivery model:
 
 - normal chat is sent to Ghost API in queued mode
+- history is enabled in the chat request
 - the connector does not wait for a direct assistant reply from `/chat`
 - Ghost replies come back through inbox polling
+- cron also polls `/inbox/groups` for active group inbox delivery
 
 ## Managed And Self-Hosted
 

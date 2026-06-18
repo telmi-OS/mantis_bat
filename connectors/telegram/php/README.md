@@ -19,13 +19,14 @@ It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2
 
 - receives Telegram webhooks
 - forwards normal chat to Ghost API `POST /chat` in queued mode
+- enables chat history in the request payload
 - supports private owner pairing through `/start CODE`
 - provides pairing recovery through `pairing.php`
 - provides protected maintenance actions through `maintenance.php`
 - uploads memory through `bat_memory_up:`
 - reports connector state through `bat_status`
 - reports command usage through `bat_help`
-- polls Ghost inbox through cron and forwards Ghost replies and proactive messages to Telegram
+- polls both `/inbox` and `/inbox/groups` through cron and forwards Ghost replies, group inbox rows, and proactive messages to Telegram
 
 ## Install
 
@@ -39,6 +40,8 @@ It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2
 Normal chat replies are not returned directly from the webhook request. They come back later through inbox polling, so cron is required for normal reply delivery.
 
 If a live Ghost runtime returns a usable inline reply while still reporting queued mode, the connector forwards that reply immediately as a fallback.
+
+Normal Ghost replies are sent to Telegram without a `Ghost Inbox` header. Labeled `System` messages are reserved for acknowledgements or system-style notices.
 
 The installer also generates:
 
