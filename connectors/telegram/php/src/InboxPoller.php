@@ -41,6 +41,7 @@ final class InboxPoller
             $ackGroupId = (string) ($message['ack_group_id'] ?? '');
             $text = (string) ($message['text'] ?? '');
             $isSystem = (bool) ($message['is_system'] ?? false);
+            $isGroupMessage = (bool) ($message['is_group_message'] ?? false);
 
             if ($deliveryKey === '' || $ackMessageId === '' || $text === '') {
                 $skipped++;
@@ -52,7 +53,13 @@ final class InboxPoller
                 continue;
             }
 
-            $telegramText = $isSystem ? "System\n\n" . $text : $text;
+            if ($isSystem) {
+                $telegramText = "System\n\n" . $text;
+            } elseif ($isGroupMessage) {
+                $telegramText = "Group inbox\n\n" . $text;
+            } else {
+                $telegramText = $text;
+            }
             foreach ($this->splitter->split($telegramText) as $chunk) {
                 $this->telegramClient->sendMessage($chatId, $chunk);
             }
@@ -134,6 +141,7 @@ final class InboxPoller
             'ack_group_id' => $groupId,
             'text' => $text,
             'is_system' => $this->isSystemMessage($item),
+            'is_group_message' => $groupId !== '',
         ];
     }
 
