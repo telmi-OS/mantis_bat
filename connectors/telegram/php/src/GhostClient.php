@@ -102,16 +102,6 @@ final class GhostClient
         ]);
     }
 
-    public function ackInbox(string $messageId, ?string $groupId = null): array
-    {
-        $payload = ['message_id' => $messageId];
-        if ($groupId !== '') {
-            $payload['group_id'] = $groupId;
-        }
-
-        return $this->request('POST', (string) $this->config->get('ghost.paths.inbox_ack', '/inbox/ack'), $payload);
-    }
-
     public function readSettings(): array
     {
         return $this->request('GET', (string) $this->config->get('ghost.paths.settings', '/settings'));

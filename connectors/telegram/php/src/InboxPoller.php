@@ -63,10 +63,7 @@ final class InboxPoller
 
         if (!$initialized) {
             foreach ($allMessages as $message) {
-                $this->storage->insertInboxBackendMessage($message, true, !empty($message['requires_ack']));
-                if (!empty($message['requires_ack'])) {
-                    $this->ackPersonalMessage($message);
-                }
+                $this->storage->insertInboxBackendMessage($message, true, false);
                 $seeded++;
             }
             $this->storage->setSetting('inbox_backend_initialized', '1');
@@ -110,10 +107,6 @@ final class InboxPoller
             $messageKey = (string) ($message['message_key'] ?? '');
             if ($messageKey !== '') {
                 $this->storage->markInboxBackendDelivered($messageKey);
-                if (!empty($message['requires_ack'])) {
-                    $this->ackPersonalMessage($message);
-                    $this->storage->markInboxBackendAcked($messageKey);
-                }
                 $delivered++;
             }
         }
@@ -151,7 +144,7 @@ final class InboxPoller
                 continue;
             }
             $sourceOrder = $total - (is_int($index) ? $index : 0);
-            $message = $this->normalizeMessage($item, 'personal', '', '', true, $fetchedAt, $sourceOrder);
+            $message = $this->normalizeMessage($item, 'personal', '', '', $fetchedAt, $sourceOrder);
             if ($message !== null) {
                 $messages[] = $message;
             }
@@ -177,7 +170,7 @@ final class InboxPoller
             $groupId = trim((string) ($item['group_id'] ?? $item['polled_group_id'] ?? ''));
             $groupLabel = $this->extractGroupLabel($item, $groupId);
             $sourceOrder = $total - (is_int($index) ? $index : 0);
-            $message = $this->normalizeMessage($item, 'group_merged', $groupId, $groupLabel, false, $fetchedAt, $sourceOrder);
+            $message = $this->normalizeMessage($item, 'group_merged', $groupId, $groupLabel, $fetchedAt, $sourceOrder);
             if ($message !== null) {
                 $messages[] = $message;
             }
@@ -191,7 +184,6 @@ final class InboxPoller
         string $source,
         string $groupId,
         string $groupLabel,
-        bool $requiresAck,
         int $fetchedAt,
         int $sourceIndex
     ): ?array {
@@ -213,7 +205,6 @@ final class InboxPoller
             'group_label' => $groupLabel,
             'text' => $text,
             'is_system' => $this->isSystemMessage($item),
-            'requires_ack' => $requiresAck,
             'sort_ts' => $timestamp['iso'],
             'sort_unix' => $timestamp['unix'],
             'fetched_at' => ($fetchedAt * 1000) + $sourceIndex,
@@ -240,16 +231,6 @@ final class InboxPoller
         }
 
         return $text;
-    }
-
-    private function ackPersonalMessage(array $message): void
-    {
-        $messageId = trim((string) ($message['message_id'] ?? ''));
-        if ($messageId === '') {
-            return;
-        }
-
-        $this->ghostClient->ackInbox($messageId);
     }
 
     private function dedupeMessages(array $messages): array

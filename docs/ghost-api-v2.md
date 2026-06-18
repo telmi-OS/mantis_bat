@@ -24,7 +24,6 @@ The public contract does not require a `ghost_id` in path or body for the docume
 
 - `POST /chat`
 - `GET /inbox`
-- `POST /inbox/ack`
 - `POST /memory/upsert`
 - `GET /memory/list`
 - `POST /memory/delete`
@@ -161,20 +160,6 @@ The Telegram connector cron now polls:
 - `GET /inbox_groups`
 
 and merges both sources into one local inbox backend before sending anything to Telegram.
-
-## Ack Shape
-
-Verified ack body:
-
-```json
-{
-  "message_id": "3921"
-}
-```
-
-Optional:
-
-- `group_id`
 
 ## Settings Notes
 

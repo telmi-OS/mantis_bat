@@ -43,7 +43,7 @@ Normal chat replies are not returned directly from the webhook request. They com
 
 If a live Ghost runtime returns a usable inline reply while still reporting queued mode, the connector forwards that reply immediately as a fallback.
 
-Normal Ghost replies are sent to Telegram without a `Ghost Inbox` header. Labeled `System` messages are reserved for acknowledgements or system-style notices.
+Normal Ghost replies are sent to Telegram without a `Ghost Inbox` header. Labeled `System` messages are reserved for system-style notices only.
 
 The installer also generates:
 

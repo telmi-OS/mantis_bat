@@ -50,7 +50,7 @@ Core flows:
 4. Ghost inbox polling sends the later assistant reply back to Telegram
 5. The same cron loop also polls `/inbox_groups` for current active group inbox rows
 6. Both feeds are merged into the connector-local inbox backend and sorted before delivery
-7. System acknowledgements can be surfaced to Telegram as labeled system notices
+7. System notices can be surfaced to Telegram as labeled system messages
 
 Current command support:
 

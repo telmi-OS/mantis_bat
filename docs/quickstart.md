@@ -622,7 +622,7 @@ Runtime note:
 - some live runtimes may still return the answer inline even with `mode: queued`
 - the connector now forwards that inline reply as a fallback
 - plain Ghost replies are sent to Telegram without a `Ghost Inbox` label
-- labeled `System` messages are reserved for acknowledgements or system-style notices
+- labeled `System` messages are reserved for system-style notices
 
 ### What To Do If Nothing Comes Back
 

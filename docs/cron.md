@@ -31,8 +31,7 @@ https://example.com/mantis-bat/public/cron.php?key=CRON_SECRET
 - poll personal `/inbox` and merged `/inbox_groups`
 - keep a local SQLite inbox backend for dedupe and ordering
 - seed the backend on first poll so old history is not replayed into Telegram
-- acknowledge personal inbox items only after successful Telegram delivery
-- never acknowledge merged group inbox rows from `/inbox_groups`
+- keep delivery state entirely in the connector runtime
 
 Without a working cron, Telegram users can send messages to Ghost, but they will not receive the later queued reply.
 
