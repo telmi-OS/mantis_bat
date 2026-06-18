@@ -32,7 +32,7 @@
 - confirm `owner_chat_id` or paired owner exists
 - confirm cron key for URL mode
 - confirm inbox endpoint returns items
-- confirm `/inbox/groups` is reachable for the same Ghost JWT
+- confirm `/inbox_groups` is reachable for the same Ghost JWT
 - call `cron.php?key=...` manually once and inspect `fetched`, `delivered`, and `skipped`
 - inspect `fetched_groups` as well when using group-driven Ghost work
 - if `fetched > 0` and `delivered = 0`, inspect connector logs because inbox items may not match the expected text/id shape

@@ -144,14 +144,14 @@ The connector normalizes both container positions and then checks likely reply-b
 
 Ghost API v2 also exposes:
 
-- `GET /inbox/groups`
+- `GET /inbox_groups`
 
 This returns merged inbox rows across the Ghost's current active group memberships, excluding the personal/default inbox.
 
 The Telegram connector cron now polls:
 
 - `GET /inbox`
-- `GET /inbox/groups`
+- `GET /inbox_groups`
 
 and fans both sources out into the same Telegram chat.
 

@@ -26,7 +26,7 @@ It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2
 - uploads memory through `bat_memory_up:`
 - reports connector state through `bat_status`
 - reports command usage through `bat_help`
-- polls both `/inbox` and `/inbox/groups` through cron and forwards Ghost replies, group inbox rows, and proactive messages to Telegram
+- polls both `/inbox` and `/inbox_groups` through cron and forwards Ghost replies, group inbox rows, and proactive messages to Telegram
 
 ## Install
 

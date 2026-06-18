@@ -8,7 +8,7 @@ In the current Telegram connector, that inbox flow is responsible for:
 
 - normal Ghost chat replies
 - proactive Ghost messages
-- active-group inbox delivery through `/inbox/groups`
+- active-group inbox delivery through `/inbox_groups`
 
 ## CLI Cron
 

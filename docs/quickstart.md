@@ -563,7 +563,7 @@ It is also required for normal Ghost chat replies in the current Telegram connec
 Cron also polls:
 
 - the Ghost personal/default inbox through `/inbox`
-- the active-group inbox stream through `/inbox/groups`
+- the active-group inbox stream through `/inbox_groups`
 
 ### Preferred: CLI Cron
 

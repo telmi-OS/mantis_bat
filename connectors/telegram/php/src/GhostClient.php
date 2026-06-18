@@ -97,7 +97,7 @@ final class GhostClient
 
     public function pullInboxGroups(): array
     {
-        return $this->request('GET', (string) $this->config->get('ghost.paths.inbox_groups', '/inbox/groups'), [], [
+        return $this->request('GET', (string) $this->config->get('ghost.paths.inbox_groups', '/inbox_groups'), [], [
             'limit' => (int) $this->config->get('limits.cron_batch_size', 20),
         ]);
     }
