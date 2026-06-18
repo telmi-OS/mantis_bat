@@ -175,8 +175,11 @@ final class Storage
         try {
             $this->pdo->exec('DELETE FROM inbox_backend_messages');
             $this->pdo->exec('DELETE FROM delivered_inbox_messages');
-            $stmt = $this->pdo->prepare('DELETE FROM settings WHERE key = :key');
-            $stmt->execute([':key' => 'inbox_backend_initialized']);
+            $stmt = $this->pdo->prepare('DELETE FROM settings WHERE key = :key OR key LIKE :prefix');
+            $stmt->execute([
+                ':key' => 'inbox_backend_initialized',
+                ':prefix' => 'inbox_scope_initialized:%',
+            ]);
             $this->pdo->commit();
         } catch (\Throwable $exception) {
             $this->pdo->rollBack();

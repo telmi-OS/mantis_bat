@@ -56,46 +56,27 @@ final class InboxPoller
         $fetchedGroups = count($groupMessages);
         $allMessages = $this->dedupeMessages([...$personalMessages, ...$groupMessages]);
 
-        $initialized = $this->storage->getSetting('inbox_backend_initialized', '0') === '1';
         $seeded = 0;
         $ingested = 0;
         $delivered = 0;
-
-        if (!$initialized) {
-            foreach ($allMessages as $message) {
-                $this->storage->insertInboxBackendMessage($message, true, false);
-                $seeded++;
-            }
-            $this->storage->setSetting('inbox_backend_initialized', '1');
-
-            $this->logger?->info('Inbox backend initialized.', [
-                'fetched' => $fetched,
-                'fetched_groups' => $fetchedGroups,
-                'seeded' => $seeded,
-                'errors' => $fetchErrors,
-            ]);
-
-            return [
-                'ok' => true,
-                'fetched' => $fetched,
-                'fetched_groups' => $fetchedGroups,
-                'seeded' => $seeded,
-                'ingested' => 0,
-                'delivered' => 0,
-                'initialized' => true,
-                'errors' => $fetchErrors,
-            ];
-        }
-
         foreach ($allMessages as $message) {
             $messageKey = (string) ($message['message_key'] ?? '');
-            if ($messageKey === '' || $this->storage->hasInboxBackendMessage($messageKey)) {
+            $scopeKey = (string) ($message['scope_key'] ?? '');
+            if ($messageKey === '' || $scopeKey === '' || $this->storage->hasInboxBackendMessage($messageKey)) {
+                continue;
+            }
+
+            if (!$this->isScopeInitialized($scopeKey)) {
+                $this->storage->insertInboxBackendMessage($message, true, false);
+                $seeded++;
                 continue;
             }
 
             $this->storage->insertInboxBackendMessage($message);
             $ingested++;
         }
+
+        $this->markSeenScopesInitialized($allMessages);
 
         $pendingMessages = $this->storage->listPendingInboxBackendMessages();
         foreach ($pendingMessages as $message) {
@@ -114,6 +95,7 @@ final class InboxPoller
         $this->logger?->info('Inbox poller run completed.', [
             'fetched' => $fetched,
             'fetched_groups' => $fetchedGroups,
+            'seeded' => $seeded,
             'ingested' => $ingested,
             'delivered' => $delivered,
             'errors' => $fetchErrors,
@@ -123,7 +105,7 @@ final class InboxPoller
             'ok' => true,
             'fetched' => $fetched,
             'fetched_groups' => $fetchedGroups,
-            'seeded' => 0,
+            'seeded' => $seeded,
             'ingested' => $ingested,
             'delivered' => $delivered,
             'errors' => $fetchErrors,
@@ -199,6 +181,7 @@ final class InboxPoller
 
         return [
             'source' => $source,
+            'scope_key' => $this->scopeKey($source, $groupId),
             'message_key' => $messageKey,
             'message_id' => $messageId,
             'group_id' => $groupId,
@@ -231,6 +214,40 @@ final class InboxPoller
         }
 
         return $text;
+    }
+
+    private function isScopeInitialized(string $scopeKey): bool
+    {
+        return $this->storage->getSetting($this->scopeSettingKey($scopeKey), '0') === '1';
+    }
+
+    private function markSeenScopesInitialized(array $messages): void
+    {
+        $seen = [];
+        foreach ($messages as $message) {
+            $scopeKey = (string) ($message['scope_key'] ?? '');
+            if ($scopeKey === '' || isset($seen[$scopeKey])) {
+                continue;
+            }
+            $seen[$scopeKey] = true;
+            if (!$this->isScopeInitialized($scopeKey)) {
+                $this->storage->setSetting($this->scopeSettingKey($scopeKey), '1');
+            }
+        }
+    }
+
+    private function scopeKey(string $source, string $groupId): string
+    {
+        if ($source === 'group_merged') {
+            return 'group:' . ($groupId !== '' ? $groupId : 'unknown');
+        }
+
+        return 'personal';
+    }
+
+    private function scopeSettingKey(string $scopeKey): string
+    {
+        return 'inbox_scope_initialized:' . $scopeKey;
     }
 
     private function dedupeMessages(array $messages): array
