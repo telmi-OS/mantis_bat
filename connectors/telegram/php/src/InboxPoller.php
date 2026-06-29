@@ -126,7 +126,8 @@ final class InboxPoller
                 continue;
             }
             $sourceOrder = $total - (is_int($index) ? $index : 0);
-            $message = $this->normalizeMessage($item, 'personal', '', '', $fetchedAt, $sourceOrder);
+            $senderLabel = $this->extractPersonalSenderLabel($item);
+            $message = $this->normalizeMessage($item, 'personal', '', $senderLabel, $fetchedAt, $sourceOrder);
             if ($message !== null) {
                 $messages[] = $message;
             }
@@ -213,7 +214,29 @@ final class InboxPoller
             return $groupLabel . "\n\n" . $text;
         }
 
+        if ($source === 'personal' && $groupLabel !== '') {
+            return $groupLabel . "\n\n" . $text;
+        }
+
         return $text;
+    }
+
+    private function extractPersonalSenderLabel(array $item): string
+    {
+        $senderId = $this->readNestedString($item, ['from_user_id']);
+        if ($senderId === '') {
+            $senderId = $this->readNestedString($item, ['data', 'from_user_id']);
+        }
+        if ($senderId === '') {
+            $senderId = $this->readNestedString($item, ['payload', 'from_user_id']);
+        }
+
+        $normalized = mb_strtolower(trim($senderId));
+        if ($normalized === '' || $normalized === 'telmi' || $normalized === 'lakshmi') {
+            return '';
+        }
+
+        return trim($senderId);
     }
 
     private function isScopeInitialized(string $scopeKey): bool
