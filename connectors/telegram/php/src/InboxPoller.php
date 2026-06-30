@@ -211,20 +211,24 @@ final class InboxPoller
         }
 
         $emoji = '';
+        $labelPrefix = '';
         if ($source === 'group_merged' && $label !== '') {
             $emoji = "\u{1F465}";
+            $labelPrefix = 'For Group ';
         }
         if ($source === 'personal' && $label !== '') {
             $emoji = "\u{1F464}";
+            $labelPrefix = 'FROM: ';
         }
 
         $chunks = $this->splitter->split($text);
         foreach ($chunks as $index => $chunk) {
             if ($index === 0 && $emoji !== '' && $label !== '') {
+                $displayLabel = $this->capitalizeLabel($label);
                 $formatted = sprintf(
                     '%s <b>%s</b>%s%s',
                     $emoji,
-                    htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                    htmlspecialchars($labelPrefix . $displayLabel, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
                     "\n\n",
                     htmlspecialchars($chunk, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
                 );
@@ -234,6 +238,16 @@ final class InboxPoller
 
             $this->telegramClient->sendMessage($chatId, $chunk);
         }
+    }
+
+    private function capitalizeLabel(string $label): string
+    {
+        $label = trim($label);
+        if ($label === '') {
+            return '';
+        }
+
+        return mb_strtoupper(mb_substr($label, 0, 1)) . mb_substr($label, 1);
     }
 
     private function extractPersonalSenderLabel(array $item): string
