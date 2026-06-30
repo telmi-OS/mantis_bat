@@ -45,6 +45,13 @@ If a live Ghost runtime returns a usable inline reply while still reporting queu
 
 Normal Ghost replies are sent to Telegram without a `Ghost Inbox` header. Labeled `System` messages are reserved for system-style notices only.
 
+Current Telegram label behavior:
+
+- personal inbox messages use `from_display_name` when available, with `from_user_id` as fallback
+- personal labels are rendered as `👤 FROM: Name`
+- merged group inbox messages use `group_display_name` when available, with older group name fields and finally `group_id` as fallback
+- group labels are rendered as `👥 For Group Name`
+
 The installer also generates:
 
 - a cron secret

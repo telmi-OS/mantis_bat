@@ -139,6 +139,13 @@ The connector normalizes both container positions and then checks likely reply-b
 - nested `data.*`
 - nested `payload.*`
 
+For personal inbox presentation, the connector also checks:
+
+- `from_display_name`
+- fallback `from_user_id`
+
+If the sender is neither `telmi` nor `lakshmi`, Telegram renders the label as `👤 FROM: Name`.
+
 ## Group Inbox Polling
 
 Ghost API v2 also exposes:
@@ -153,6 +160,8 @@ Current runtime behavior note:
 - `limit` is applied per group, not globally
 - group rows are not acknowledged by this endpoint
 - the connector therefore keeps its own local dedupe and ordering state in SQLite
+- the connector prefers `group_display_name` for Telegram labels, with older group name fields and finally `group_id` as fallback
+- Telegram renders that group label as `👥 For Group Name`
 
 The Telegram connector cron now polls:
 

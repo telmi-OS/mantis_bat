@@ -623,6 +623,8 @@ Runtime note:
 - the connector now forwards that inline reply as a fallback
 - plain Ghost replies are sent to Telegram without a `Ghost Inbox` label
 - labeled `System` messages are reserved for system-style notices
+- personal inbox labels render as `👤 FROM: Name` when `from_display_name` or fallback sender ID is available
+- group inbox labels render as `👥 For Group Name` when `group_display_name` or fallback group identity is available
 
 ### What To Do If Nothing Comes Back
 
