@@ -2,9 +2,10 @@
 
 declare(strict_types=1);
 
-$services = require dirname(__DIR__) . '/src/bootstrap.php';
+$moduleRoot = dirname(__DIR__);
+$services = require $moduleRoot . '/src/bootstrap.php';
 
-/** @var MantisBat\Config $config */
+/** @var MantisBat\RuntimeConfig $config */
 $config = $services['config'];
 /** @var MantisBat\Security $security */
 $security = $services['security'];
@@ -78,7 +79,7 @@ try {
         exit;
     }
 
-    if (preg_match('/^\/start(?:\s+(.+))?$/i', $text, $matches) === 1) {
+    if (preg_match('/^\/start(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?$/i', $text, $matches) === 1) {
         $pairingCode = trim((string) ($matches[1] ?? ''));
         if ($pairingCode === '') {
             $telegram->sendMessage($chatId, 'This connector is not paired yet.');

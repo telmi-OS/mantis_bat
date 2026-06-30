@@ -24,7 +24,6 @@ The public contract does not require a `ghost_id` in path or body for the docume
 
 - `POST /chat`
 - `GET /inbox`
-- `POST /inbox/ack`
 - `POST /memory/upsert`
 - `GET /memory/list`
 - `POST /memory/delete`
@@ -51,9 +50,16 @@ Current connector request shape:
 ```json
 {
   "message": "Hello from Telegram",
+  "mode": "queued",
+  "history": true,
+  "use_history": true,
   "meta": {
     "source": "mantis_bat",
     "channel": "telegram"
+  },
+  "options": {
+    "mode": "queued",
+    "use_history": true
   }
 }
 ```
@@ -71,6 +77,27 @@ Expected success body:
 ```
 
 The connector should normalize `reply` first and treat missing `reply` as an upstream error.
+
+## Queued Chat Mode
+
+Ghost API v2 chat supports queued execution.
+
+For queued use:
+
+- send `mode: queued`
+- send `history: true` or `use_history: true` when you want live history context
+- or send `options.mode: queued`
+- or send `options.use_history: true`
+- `/chat` returns an acknowledgement
+- collect the later assistant response through `/inbox`
+
+The Telegram PHP connector now uses queued mode for normal chat, so the webhook request does not wait for the final assistant reply.
+
+Live runtime note:
+
+- the published contract says queued mode should acknowledge `/chat` and deliver the later assistant response through `/inbox`
+- some live Ghost runtimes may still return a usable assistant reply inline while reporting `status: queued`
+- the Telegram connector now accepts that inline reply as a fallback when no queued `job_id` is present
 
 ## Memory Upsert Shape
 
@@ -102,21 +129,46 @@ This means `bat_memory_up:` targets `POST /memory/upsert` with an `items` array.
 - `data.items`
 - top-level `items`
 
-The connector normalizes both container positions and then checks fields such as `text`, `message`, `content`, or `body`.
+The connector normalizes both container positions and then checks likely reply-bearing fields such as:
 
-## Ack Shape
+- `text`
+- `message`
+- `content`
+- `body`
+- `reply`
+- nested `data.*`
+- nested `payload.*`
 
-Verified ack body:
+For personal inbox presentation, the connector also checks:
 
-```json
-{
-  "message_id": "3921"
-}
-```
+- `from_display_name`
+- fallback `from_user_id`
 
-Optional:
+If the sender is neither `telmi` nor `lakshmi`, Telegram renders the label as `👤 FROM: Name`.
 
-- `group_id`
+## Group Inbox Polling
+
+Ghost API v2 also exposes:
+
+- `GET /inbox_groups`
+
+This returns merged inbox rows across the Ghost's current active group memberships, excluding the personal/default inbox.
+
+Current runtime behavior note:
+
+- top-level `items` are already merged newest-first
+- `limit` is applied per group, not globally
+- group rows are not acknowledged by this endpoint
+- the connector therefore keeps its own local dedupe and ordering state in SQLite
+- the connector prefers `group_display_name` for Telegram labels, with older group name fields and finally `group_id` as fallback
+- Telegram renders that group label as `👥 For Group Name`
+
+The Telegram connector cron now polls:
+
+- `GET /inbox`
+- `GET /inbox_groups`
+
+and merges both sources into one local inbox backend before sending anything to Telegram.
 
 ## Settings Notes
 

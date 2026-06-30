@@ -2,17 +2,25 @@
 
 # Commands
 
-The Telegram PHP connector supports normal chat plus three connector commands.
+The Telegram PHP connector supports normal chat plus connector commands.
 
 ## Normal Chat
 
-Any plain message is forwarded to the Ghost chat endpoint.
+Any plain message is forwarded to the Ghost chat endpoint in queued mode.
 
 Example:
 
 ```text
 What should I focus on today?
 ```
+
+Behavior:
+
+- the connector sends the message to `POST /chat`
+- it sets queued mode
+- it enables history in the request payload
+- it does not wait for the final assistant reply in the webhook request
+- the later Ghost answer is delivered through inbox polling
 
 ## Memory Upload
 
@@ -37,17 +45,24 @@ Memory uploaded to your Ghost.
 
 ## Status
 
-Current command:
-
 ```text
 bat_status
 ```
 
-`bat_status` should report connector state without secrets.
+`bat_status` reports connector state without secrets.
+
+Current response includes:
+
+- Telegram connected
+- Ghost API configured
+- chat mode queued
+- history enabled
+- paired owner label
+- cron inbox availability for personal + merged groups
+- memory command availability
+- version
 
 ## Help
-
-Current command:
 
 ```text
 bat_help
@@ -57,5 +72,14 @@ bat_help
 
 - normal chat
 - memory upload
+- memory search command name placeholder
 - status command
 - help command
+
+## Planned But Not Enabled
+
+These command names exist, but currently reply with a not-enabled message:
+
+- `bat_memory_search:`
+- `bat_memory_list`
+- `bat_memory_delete:`

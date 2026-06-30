@@ -28,30 +28,39 @@ Mantis Bat handles the connector edge:
 
 ## Current Public Release
 
-The current shipped connector is a Telegram bot connector for PHP shared hosting.
+The current shipped connector is a Telegram bot connector for PHP.
 
 The repository is shaped as a connector framework, and this is what is public today:
 
 - one Telegram PHP connector module in `connectors/telegram/php/`
 - one private paired Telegram owner
-- Ghost chat through `POST /chat`
-- Ghost inbox polling through cron
+- Ghost chat submission through `POST /chat` in queued mode
+- Ghost chat history enabled in the request payload
+- Ghost inbox polling through cron for replies, proactive delivery, and active-group inbox fan-out
+- local SQLite inbox buffering for dedupe, baseline seeding, and cross-feed ordering
 - memory upload through `bat_memory_up:`
+- pairing recovery through `pairing.php`
+- protected maintenance actions through `maintenance.php`
 
 Core flows:
 
 1. Telegram message enters webhook
-2. Authorized user message is routed to Ghost API v2
-3. Ghost reply is returned to Telegram
-4. Ghost inbox polling can send proactive follow-ups back to Telegram
+2. Authorized user message is routed to Ghost API v2 in queued mode
+3. `/chat` returns an acknowledgement instead of the final assistant reply
+4. Ghost inbox polling sends the later assistant reply back to Telegram
+5. The same cron loop also polls `/inbox_groups` for current active group inbox rows
+6. Both feeds are merged into the connector-local inbox backend and sorted before delivery
+7. System notices can be surfaced to Telegram as labeled system messages
 
-Special command support starts on day one:
+Current command support:
 
 ```text
 bat_memory_up: <text>
+bat_status
+bat_help
 ```
 
-This sends structured memory data to Ghost API v2 instead of normal chat.
+`bat_memory_up:` sends structured memory data to Ghost API v2 instead of normal chat.
 
 ## Why Teleport AI Publishes This
 
@@ -70,9 +79,12 @@ That gives the connector user access to a Ghost that can already sit on:
 
 When Telegram is connected to a properly configured Ghost, the connector can use capabilities that already exist in telmi OS:
 
-- normal conversational replies through `/chat`
+- queued conversational submission through `/chat`
 - memory upload through `/memory/upsert`
+- Ghost reply delivery through `/inbox`
+- group reply delivery through `/inbox_groups`
 - proactive updates through `/inbox`
+- connector-local dedupe and ordering across both inbox feeds
 - group-aware prompts when `group_id` is allowed by token
 - action-capable Ghost behavior only if the Ghost itself is configured for that on the telmi OS side
 

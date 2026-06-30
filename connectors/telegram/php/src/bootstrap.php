@@ -7,7 +7,7 @@ $moduleRoot = dirname(__DIR__);
 foreach ([
     'Response',
     'Security',
-    'Config',
+    'RuntimeConfig',
     'Storage',
     'Logger',
     'TelegramClient',
@@ -24,19 +24,19 @@ foreach ([
 
 use MantisBat\ChatHandler;
 use MantisBat\CommandRouter;
-use MantisBat\Config;
 use MantisBat\GhostClient;
 use MantisBat\InboxPoller;
 use MantisBat\Installer;
 use MantisBat\Logger;
 use MantisBat\MemoryCommandHandler;
 use MantisBat\MessageSplitter;
+use MantisBat\RuntimeConfig;
 use MantisBat\Security;
 use MantisBat\Storage;
 use MantisBat\TelegramClient;
 
 $security = new Security();
-$config = new Config($moduleRoot . '/storage/config.php');
+$config = new RuntimeConfig($moduleRoot . '/storage/config.php');
 $storage = new Storage($moduleRoot . '/storage/mantis_bat.sqlite');
 $storage->migrate();
 $logger = new Logger(
@@ -55,7 +55,7 @@ $splitter = new MessageSplitter((int) $config->get('limits.telegram_max_message_
 $memoryHandler = new MemoryCommandHandler($config, $ghost);
 $commandRouter = new CommandRouter($config, $memoryHandler, $storage);
 $chatHandler = new ChatHandler($ghost, $telegram, $splitter);
-$inboxPoller = new InboxPoller($storage, $ghost, $telegram, $splitter, $logger);
+$inboxPoller = new InboxPoller($storage, $config, $ghost, $telegram, $splitter, $logger);
 $installer = new Installer($moduleRoot, $security);
 
 return [

@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
-$services = require dirname(__DIR__) . '/src/bootstrap.php';
-/** @var MantisBat\Config $config */
+$moduleRoot = dirname(__DIR__);
+$services = require $moduleRoot . '/src/bootstrap.php';
+/** @var MantisBat\RuntimeConfig $config */
 $config = $services['config'];
 
 $target = $config->isInstalled() ? 'status.php' : 'install.php';

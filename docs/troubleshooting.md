@@ -14,6 +14,13 @@
 - pair the owner account first through `/start CODE`
 - confirm the paired Telegram user ID matches the sender
 
+## Pairing Fails
+
+- open the private `pairing.php?key=...` URL from the installer
+- generate a fresh pairing code
+- send `/start CODE` again
+- if you want to remove the old owner first, use `maintenance.php?key=...`
+
 ## Memory Upload Fails
 
 - confirm Ghost JWT is valid
@@ -25,9 +32,26 @@
 - confirm `owner_chat_id` or paired owner exists
 - confirm cron key for URL mode
 - confirm inbox endpoint returns items
+- confirm `/inbox_groups` is reachable for the same Ghost JWT
+- call `cron.php?key=...` manually once and inspect `fetched`, `fetched_groups`, `seeded`, `ingested`, and `delivered`
+- on the first successful run, `seeded > 0` with `delivered = 0` is expected because the connector is establishing its baseline
+- if later runs show `ingested > 0` and `delivered = 0`, inspect connector logs because Telegram delivery or local inbox state may be failing
 
 ## Status Or Health Returns Not Found
 
 - confirm you are using the full secret URL from the installer
 - confirm the secret was copied completely
 - if you lost it, unlock and reinstall or inspect your private config on the server
+
+## Need To Unpair, Switch Ghost, Or Start Over
+
+Use `maintenance.php?key=...`
+
+It supports:
+
+- unpair Telegram owner
+- generate a fresh pairing code
+- switch Ghost API base / JWT / default group
+- delete Telegram webhook
+- reset only the local inbox backend
+- factory reset the connector

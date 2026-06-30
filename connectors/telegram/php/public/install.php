@@ -6,16 +6,20 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
-$services = require dirname(__DIR__) . '/src/bootstrap.php';
+$moduleRoot = dirname(__DIR__);
+foreach ([
+    'Security',
+    'RuntimeConfig',
+    'Installer',
+    'TelegramClient',
+    'GhostClient',
+    'Storage',
+] as $classFile) {
+    require_once $moduleRoot . '/src/' . $classFile . '.php';
+}
 
-/** @var MantisBat\Installer $installer */
-$installer = $services['installer'];
-/** @var MantisBat\Security $security */
-$security = $services['security'];
-/** @var MantisBat\Logger $logger */
-$logger = $services['logger'];
-/** @var MantisBat\Storage $storage */
-$storage = $services['storage'];
+$security = new MantisBat\Security();
+$installer = new MantisBat\Installer($moduleRoot, $security);
 
 $requirements = $installer->requirements();
 $locked = is_file($installer->lockPath());
@@ -28,21 +32,18 @@ $pairingLink = '';
 $cronUrl = '';
 $statusUrl = '';
 $healthUrl = '';
+$maintenanceUrl = '';
+$pairingAdminUrl = '';
 $statusSecret = '';
 $healthSecret = '';
 $unlockAllowed = false;
-$pathChecks = [];
+$ghostProbe = null;
+$ghostProbePreview = '';
+$configWritten = false;
 
-$existingConfig = new MantisBat\Config($installer->configPath());
+$existingConfig = new MantisBat\RuntimeConfig($installer->configPath());
 if ($locked) {
     $unlockAllowed = $security->verifySecret($unlockToken, (string) $existingConfig->get('app.installer_secret_hash', ''));
-}
-
-$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-$host = (string) ($_SERVER['HTTP_HOST'] ?? '');
-$requestUri = (string) ($_SERVER['REQUEST_URI'] ?? '');
-if ($host !== '' && $requestUri !== '') {
-    $pathChecks = $installer->protectedPathChecks($scheme . '://' . $host . $requestUri);
 }
 
 $defaults = [
@@ -58,11 +59,6 @@ $defaults = [
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        $remoteIp = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
-        if ($storage->hitRateLimit('install_ip', $remoteIp, 12, 900)) {
-            throw new RuntimeException('Too many install attempts. Wait and try again.');
-        }
-
         $postedCsrf = isset($_POST['csrf_token']) && is_string($_POST['csrf_token']) ? $_POST['csrf_token'] : '';
         if (!$security->constantTimeEquals($csrfToken, $postedCsrf)) {
             throw new RuntimeException('Invalid installer session token. Reload the page and try again.');
@@ -74,6 +70,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$installer->allRequirementsPass()) {
             throw new RuntimeException('Server requirements are not satisfied.');
+        }
+
+        $storage = new MantisBat\Storage($installer->databasePath());
+        $storage->migrate();
+
+        $remoteIp = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        if ($storage->hitRateLimit('install_ip', $remoteIp, 12, 900)) {
+            throw new RuntimeException('Too many install attempts. Wait and try again.');
         }
 
         $telegram = new MantisBat\TelegramClient($defaults['telegram_bot_token']);
@@ -109,7 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'paths' => [
                     'chat' => '/chat',
                     'inbox' => '/inbox',
-                    'inbox_ack' => '/inbox/ack',
+                    'inbox_groups' => '/inbox_groups',
                     'memory_upsert' => '/memory/upsert',
                     'memory_list' => '/memory/list',
                     'memory_delete' => '/memory/delete',
@@ -129,28 +133,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'telegram_max_message_chars' => 3900,
                 'max_inbound_message_chars' => 20000,
                 'max_memory_upload_chars' => 50000,
-                'cron_batch_size' => 20,
+                'cron_batch_size' => 50,
             ],
         ];
 
         $installer->writeConfig($config);
+        $configWritten = true;
 
-        $reloaded = require dirname(__DIR__) . '/src/bootstrap.php';
-        /** @var MantisBat\GhostClient $ghost */
-        $ghost = $reloaded['ghost'];
-        /** @var MantisBat\Storage $storage */
-        $storage = $reloaded['storage'];
-        /** @var MantisBat\Installer $installerReloaded */
-        $installerReloaded = $reloaded['installer'];
-
-        $ghost->readSettings();
+        $runtimeConfig = new MantisBat\RuntimeConfig($installer->configPath());
+        $ghost = new MantisBat\GhostClient($runtimeConfig);
+        $ghostProbe = $ghost->probeSettings();
+        $ghostProbePreview = $ghost->preview((string) $ghostProbe['body']);
+        $decodedProbe = json_decode((string) $ghostProbe['body'], true);
+        if (!is_array($decodedProbe)) {
+            throw new RuntimeException(sprintf(
+                "Ghost API probe failed.\nURL: %s\nStatus: %d\nContent-Type: %s\nPreview: %s",
+                $ghostProbe['url'],
+                (int) $ghostProbe['status'],
+                (string) ($ghostProbe['content_type'] !== '' ? $ghostProbe['content_type'] : 'unknown'),
+                $ghostProbePreview
+            ));
+        }
+        if ((int) $ghostProbe['status'] >= 400 || (($decodedProbe['ok'] ?? true) === false)) {
+            throw new RuntimeException(sprintf(
+                "Ghost API probe failed.\nURL: %s\nStatus: %d\nError: %s",
+                $ghostProbe['url'],
+                (int) $ghostProbe['status'],
+                (string) ($decodedProbe['error'] ?? 'Unknown Ghost API error')
+            ));
+        }
 
         $pairingCode = strtoupper(substr($security->randomToken(8), 0, 6));
-        $storage->createPairingCode($pairingCode, time() + 600);
+        $storage->createPairingCode($pairingCode, time() + 86400);
 
         $webhookUrl = rtrim($defaults['app_base_url'], '/') . '/webhook.php';
         $telegram->setWebhook($webhookUrl, $defaults['telegram_webhook_secret']);
-        $installerReloaded->lock($security->randomToken(8));
+        $installer->lock($security->randomToken(8));
 
         $pairingLink = sprintf('https://t.me/%s?start=%s', $botUsername, $pairingCode);
         $cronUrl = rtrim($defaults['app_base_url'], '/') . '/cron.php?key=' . rawurlencode($defaults['app_cron_secret']);
@@ -158,11 +176,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $healthSecret = (string) $config['app']['health_secret'];
         $statusUrl = rtrim($defaults['app_base_url'], '/') . '/status.php?key=' . rawurlencode($statusSecret);
         $healthUrl = rtrim($defaults['app_base_url'], '/') . '/health.php?key=' . rawurlencode($healthSecret);
+        $maintenanceUrl = rtrim($defaults['app_base_url'], '/') . '/maintenance.php?key=' . rawurlencode($statusSecret);
+        $pairingAdminUrl = rtrim($defaults['app_base_url'], '/') . '/pairing.php?key=' . rawurlencode($statusSecret);
         $message = "Install complete.\nTelegram validated.\nGhost validated.\nWebhook registered.";
     } catch (Throwable $exception) {
-        $logger->exception($exception);
+        if ($configWritten && !$locked) {
+            @unlink($installer->configPath());
+            @unlink($installer->lockPath());
+        }
+        error_log('[Mantis Bat installer] ' . $exception->getMessage());
         $message = $exception->getMessage();
     }
 }
 
-require dirname(__DIR__) . '/templates/install.html.php';
+require $moduleRoot . '/templates/install.html.php';

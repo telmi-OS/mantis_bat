@@ -26,7 +26,7 @@ return [
         'paths' => [
             'chat' => '/chat',
             'inbox' => '/inbox',
-            'inbox_ack' => '/inbox/ack',
+            'inbox_groups' => '/inbox_groups',
             'memory_upsert' => '/memory/upsert',
             'memory_list' => '/memory/list',
             'memory_delete' => '/memory/delete',
@@ -46,6 +46,6 @@ return [
         'telegram_max_message_chars' => 3900,
         'max_inbound_message_chars' => 20000,
         'max_memory_upload_chars' => 50000,
-        'cron_batch_size' => 20,
+        'cron_batch_size' => 50,
     ],
 ];

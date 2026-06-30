@@ -10,10 +10,6 @@ This guide is the full beginner path for the first shipping Mantis Bat module:
 
 If you have never deployed a PHP tool before, follow the steps in order and do not skip the security notes.
 
-This is the self-hosted path.
-
-If you are using a managed telmi OS deployment path, Teleport AI can also handle connector installation directly inside the telmi OS environment.
-
 ## Super Short Version
 
 If you want the whole process in one glance, this is it:
@@ -28,8 +24,9 @@ If you want the whole process in one glance, this is it:
 8. Open the Telegram pairing link
 9. Press `Start`
 10. Set up cron
-11. Send `hello`
-12. Send `bat_memory_up: something to remember`
+11. Save the maintenance and pairing recovery URLs
+12. Send `hello`
+13. Send `bat_memory_up: something to remember`
 
 Everything below explains those steps slowly and exactly.
 
@@ -54,6 +51,8 @@ When setup is finished, you will have:
 - one private cron URL
 - one private status URL
 - one private health URL
+- one private maintenance URL
+- one private pairing recovery URL
 
 ## What You Must Keep Private
 
@@ -65,6 +64,8 @@ Before doing anything else, understand this:
 - your cron URL is private
 - your status URL is private
 - your health URL is private
+- your maintenance URL is private
+- your pairing recovery URL is private
 - your installer unlock secret is private
 - `storage/config.php` is private
 
@@ -82,8 +83,11 @@ It sits between:
 
 That means:
 
-- Telegram messages go to your Ghost through your connector
-- proactive Ghost inbox messages can come back to Telegram
+- Telegram messages go to your Ghost through your connector in queued mode
+- Telegram chat requests include history context
+- Ghost replies come back through inbox polling
+- active group inbox rows can also come back through cron polling
+- proactive Ghost inbox messages can also come back to Telegram
 - you stay in control of the bot token and hosting path
 
 ## Step 1: Create Or Choose Your Ghost
@@ -172,42 +176,15 @@ Your host needs:
 
 ### Public Folder Layout
 
-Best practice:
+Expose only this folder to the web:
 
-- only expose `connectors/telegram/php/public/` to the web
+- `connectors/telegram/php/public/`
 
-Common shared-hosting reality:
+Keep the rest of the connector private on the server, especially:
 
-- some users upload the whole module into `public_html`
-
-If you must upload the whole module, the project still tries to protect internal files, but the preferred setup is still a dedicated public folder pointing at `public/`.
-
-### If You Uploaded The Whole Folder Publicly
-
-Before continuing, test these URLs in the browser:
-
-```text
-https://example.com/mantis-bat/storage/config.php
-https://example.com/mantis-bat/storage/mantis_bat.sqlite
-https://example.com/mantis-bat/src/Config.php
-https://example.com/mantis-bat/templates/install.html.php
-```
-
-They must not open.
-
-Good result:
-
-- `403 Forbidden`
-- `404 Not Found`
-- or a host-level blocked page
-
-Bad result:
-
-- file download
-- PHP source display
-- blank page with accessible content
-
-If the result is bad, do not continue with install.
+- `storage/`
+- `src/`
+- `templates/`
 
 ### Beginner-Friendly Hosting Check
 
@@ -229,7 +206,7 @@ Upload the folder:
 connectors/telegram/php/
 ```
 
-Example final public URL:
+Example public install URL:
 
 ```text
 https://example.com/mantis-bat/public/install.php
@@ -482,11 +459,18 @@ Save these immediately:
 - cron URL with secret
 - status URL with secret
 - health URL with secret
+- maintenance URL with secret
+- pairing recovery URL with secret
 - your installer unlock secret
 
 These are the private operational secrets and private operational URLs for the connector.
 
 Treat those URLs like credentials. Do not publish them.
+
+### What The New Private URLs Are For
+
+- `pairing.php?key=...` creates a fresh single-use pairing code without reinstalling
+- `maintenance.php?key=...` lets you unpair, switch Ghost, delete webhook, or factory-reset the connector
 
 ### Save Them Somewhere Safe
 
@@ -532,6 +516,8 @@ After a successful install, you should see:
 - a cron URL
 - a status URL
 - a health URL
+- a maintenance URL
+- a pairing recovery URL
 
 If you do not see those, the install did not finish correctly.
 
@@ -550,6 +536,7 @@ Then:
 3. The bot sends `/start CODE` to your connector
 4. The connector stores your Telegram user ID and chat ID
 5. The pairing code becomes invalid after use
+6. If pairing fails, use the pairing recovery URL to mint a fresh code
 
 Expected success message:
 
@@ -570,6 +557,13 @@ This Mantis Bat connector is private.
 ## Step 9: Configure Cron
 
 This is required for Ghost inbox polling.
+
+It is also required for normal Ghost chat replies in the current Telegram connector, because chat uses queued mode.
+
+Cron also polls:
+
+- the Ghost personal/default inbox through `/inbox`
+- the active-group inbox stream through `/inbox_groups`
 
 ### Preferred: CLI Cron
 
@@ -615,10 +609,22 @@ Expected behavior:
 - Telegram sends the webhook to your connector
 - your connector validates the webhook secret
 - your connector verifies you are the paired owner
-- your connector calls `POST /chat`
-- the Ghost reply is sent back to Telegram
+- your connector calls `POST /chat` in queued mode
+- your connector sends history enabled
+- Ghost API acknowledges the request
+- the later Ghost reply is delivered back to Telegram through cron inbox polling
 
-If the reply is very long, the connector splits it into smaller Telegram-safe messages.
+If the reply is very long, the connector splits it into smaller Telegram-safe messages when the inbox poller delivers it.
+
+Runtime note:
+
+- the ideal Ghost API v2 queued flow is later inbox delivery
+- some live runtimes may still return the answer inline even with `mode: queued`
+- the connector now forwards that inline reply as a fallback
+- plain Ghost replies are sent to Telegram without a `Ghost Inbox` label
+- labeled `System` messages are reserved for system-style notices
+- personal inbox labels render as `👤 FROM: Name` when `from_display_name` or fallback sender ID is available
+- group inbox labels render as `👥 For Group Name` when `group_display_name` or fallback group identity is available
 
 ### What To Do If Nothing Comes Back
 
@@ -628,6 +634,7 @@ Check:
 - is the webhook URL correct?
 - is the Telegram webhook secret correct?
 - is the Ghost JWT valid?
+- is cron running?
 - does `health.php?key=...` show `installed: true`?
 
 ## Step 11: Test Memory Upload
@@ -681,6 +688,19 @@ Both endpoints are secret-protected. If you open them without the correct `?key=
 
 Status is for private diagnostics only.
 
+### Maintenance Gives You
+
+The private `maintenance.php?key=...` page can:
+
+- unpair the current Telegram owner
+- generate a new pairing code
+- switch Ghost API base, JWT, or default group
+- delete the Telegram webhook
+- reset only the connector-local inbox backend
+- factory-reset the whole connector
+
+Use `Reset Local Inbox Backend` when telmi OS remains the source of truth and you want the connector to restart inbox tracking without reinstalling or re-pairing.
+
 ## What Stays Private
 
 Never publish:
@@ -719,7 +739,7 @@ Before calling the setup finished, make sure all of these are true:
 - Ghost JWT validated
 - webhook registered
 - pairing link worked
-- `hello` gets a Ghost reply
+- `hello` gets a Ghost reply through inbox polling
 - `bat_memory_up: ...` succeeds
 - cron is configured
 - private URLs were saved

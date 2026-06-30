@@ -2,9 +2,10 @@
 
 declare(strict_types=1);
 
-$services = require dirname(__DIR__) . '/src/bootstrap.php';
+$moduleRoot = dirname(__DIR__);
+$services = require $moduleRoot . '/src/bootstrap.php';
 
-/** @var MantisBat\Config $config */
+/** @var MantisBat\RuntimeConfig $config */
 $config = $services['config'];
 /** @var MantisBat\Storage $storage */
 $storage = $services['storage'];
@@ -29,4 +30,5 @@ echo json_encode([
     'ghost_configured' => (string) $config->get('ghost.api_token', '') !== '',
     'paired' => $owner !== null,
     'version' => $config->get('app.version', '0.1.0'),
+    'build' => $config->buildFingerprint(),
 ], JSON_UNESCAPED_SLASHES);

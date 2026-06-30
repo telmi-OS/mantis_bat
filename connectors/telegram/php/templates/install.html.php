@@ -54,30 +54,6 @@ declare(strict_types=1);
             </ul>
         </section>
 
-        <?php if ($pathChecks !== []): ?>
-            <section class="card">
-                <h2><span class="gradient-text">Public Exposure Check</span></h2>
-                <p class="copy">The installer tested a few non-public paths from this server. Continue only if they are blocked.</p>
-                <ul class="clean-list">
-                    <?php foreach ($pathChecks as $check): ?>
-                        <li>
-                            <img src="assets/mantis-pixel-bullet.svg" alt="">
-                            <span>
-                                <strong><?= htmlspecialchars($check['url'], ENT_QUOTES, 'UTF-8') ?></strong><br>
-                                <?php if ($check['safe'] === true): ?>
-                                    <span class="status-ok">HTTP <?= (int) $check['status'] ?>. <?= htmlspecialchars($check['message'], ENT_QUOTES, 'UTF-8') ?></span>
-                                <?php elseif ($check['safe'] === false): ?>
-                                    <span class="status-bad">HTTP <?= (int) $check['status'] ?>. <?= htmlspecialchars($check['message'], ENT_QUOTES, 'UTF-8') ?></span>
-                                <?php else: ?>
-                                    <span class="field-help"><?= htmlspecialchars($check['message'], ENT_QUOTES, 'UTF-8') ?></span>
-                                <?php endif; ?>
-                            </span>
-                        </li>
-                    <?php endforeach; ?>
-                </ul>
-            </section>
-        <?php endif; ?>
-
         <?php if ($locked && !$unlockAllowed): ?>
             <section class="card">
                 <h2><span class="gradient-text">Installer Locked</span></h2>
@@ -90,6 +66,21 @@ declare(strict_types=1);
             <section class="card">
                 <h2><span class="gradient-text">Install Status</span></h2>
                 <pre><?= htmlspecialchars($message, ENT_QUOTES, 'UTF-8') ?></pre>
+            </section>
+        <?php endif; ?>
+
+        <?php if (is_array($ghostProbe)): ?>
+            <section class="card">
+                <h2><span class="gradient-text">Ghost API Probe</span></h2>
+                <p class="copy">This is the direct install-time probe against the Ghost API settings endpoint.</p>
+                <pre><?= htmlspecialchars(
+                    "URL: " . ($ghostProbe['url'] ?? '') . "\n" .
+                    "Status: " . (string) ($ghostProbe['status'] ?? '') . "\n" .
+                    "Content-Type: " . (string) (($ghostProbe['content_type'] ?? '') !== '' ? $ghostProbe['content_type'] : 'unknown') . "\n" .
+                    "Preview: " . $ghostProbePreview,
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?></pre>
             </section>
         <?php endif; ?>
 
@@ -154,6 +145,7 @@ declare(strict_types=1);
                 <p class="copy">The installer has finished. Save everything below in a password manager or private team vault before closing this page.</p>
                 <p><strong>Pairing code</strong></p>
                 <pre><?= htmlspecialchars($pairingCode, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p class="copy">This code is single-use and stays valid for 24 hours.</p>
                 <p><strong>Telegram deep link</strong></p>
                 <pre><?= htmlspecialchars($pairingLink, ENT_QUOTES, 'UTF-8') ?></pre>
                 <p><strong>Cron URL</strong></p>
@@ -162,6 +154,10 @@ declare(strict_types=1);
                 <pre><?= htmlspecialchars($statusUrl, ENT_QUOTES, 'UTF-8') ?></pre>
                 <p><strong>Health URL</strong></p>
                 <pre><?= htmlspecialchars($healthUrl, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p><strong>Maintenance URL</strong></p>
+                <pre><?= htmlspecialchars($maintenanceUrl, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p><strong>Pairing Recovery URL</strong></p>
+                <pre><?= htmlspecialchars($pairingAdminUrl, ENT_QUOTES, 'UTF-8') ?></pre>
             </section>
         <?php endif; ?>
     </div>

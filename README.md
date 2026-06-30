@@ -62,11 +62,28 @@ This module is built for:
 - SQLite
 - cURL
 - HTTPS
-- cheap shared hosting
+- standard PHP hosting
 - browser installer
 - cron or URL cron
 
 It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2.
+
+Current operational pages include:
+
+- install
+- status
+- health
+- pairing recovery
+- maintenance
+
+Current Telegram delivery model:
+
+- normal chat is sent to Ghost API in queued mode
+- history is enabled in the chat request
+- the connector does not wait for a direct assistant reply from `/chat`
+- Ghost replies come back through inbox polling
+- cron polls `/inbox` and `/inbox_groups`
+- the connector keeps its own local inbox backend so Telegram delivery is deduped and time-ordered across both sources
 
 ## Managed And Self-Hosted
 
