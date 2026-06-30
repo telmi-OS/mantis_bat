@@ -80,10 +80,7 @@ final class InboxPoller
 
         $pendingMessages = $this->storage->listPendingInboxBackendMessages();
         foreach ($pendingMessages as $message) {
-            $telegramText = $this->formatTelegramText($message);
-            foreach ($this->splitter->split($telegramText) as $chunk) {
-                $this->telegramClient->sendMessage($chatId, $chunk);
-            }
+            $this->sendTelegramMessage($chatId, $message);
 
             $messageKey = (string) ($message['message_key'] ?? '');
             if ($messageKey !== '') {
@@ -195,30 +192,48 @@ final class InboxPoller
         ];
     }
 
-    private function formatTelegramText(array $message): string
+    private function sendTelegramMessage(string $chatId, array $message): void
     {
         $text = trim((string) ($message['text'] ?? ''));
         $source = trim((string) ($message['source'] ?? 'personal'));
-        $groupLabel = trim((string) ($message['group_label'] ?? ''));
+        $label = trim((string) ($message['group_label'] ?? ''));
         $isSystem = !empty($message['is_system']);
 
         if ($text === '') {
-            return '';
+            return;
         }
 
         if ($isSystem) {
-            return "System\n\n" . $text;
+            foreach ($this->splitter->split("System\n\n" . $text) as $chunk) {
+                $this->telegramClient->sendMessage($chatId, $chunk);
+            }
+            return;
         }
 
-        if ($source === 'group_merged' && $groupLabel !== '') {
-            return $groupLabel . "\n\n" . $text;
+        $emoji = '';
+        if ($source === 'group_merged' && $label !== '') {
+            $emoji = "\u{1F465}";
+        }
+        if ($source === 'personal' && $label !== '') {
+            $emoji = "\u{1F464}";
         }
 
-        if ($source === 'personal' && $groupLabel !== '') {
-            return $groupLabel . "\n\n" . $text;
-        }
+        $chunks = $this->splitter->split($text);
+        foreach ($chunks as $index => $chunk) {
+            if ($index === 0 && $emoji !== '' && $label !== '') {
+                $formatted = sprintf(
+                    '%s <b>%s</b>%s%s',
+                    $emoji,
+                    htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                    "\n\n",
+                    htmlspecialchars($chunk, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                );
+                $this->telegramClient->sendMessage($chatId, $formatted, ['parse_mode' => 'HTML']);
+                continue;
+            }
 
-        return $text;
+            $this->telegramClient->sendMessage($chatId, $chunk);
+        }
     }
 
     private function extractPersonalSenderLabel(array $item): string
@@ -234,6 +249,17 @@ final class InboxPoller
         $normalized = mb_strtolower(trim($senderId));
         if ($normalized === '' || $normalized === 'telmi' || $normalized === 'lakshmi') {
             return '';
+        }
+
+        foreach ([
+            ['from_display_name'],
+            ['data', 'from_display_name'],
+            ['payload', 'from_display_name'],
+        ] as $path) {
+            $displayName = $this->readNestedString($item, $path);
+            if ($displayName !== '') {
+                return $displayName;
+            }
         }
 
         return trim($senderId);
@@ -292,14 +318,17 @@ final class InboxPoller
     private function extractGroupLabel(array $item, string $fallback = ''): string
     {
         foreach ([
+            ['group_display_name'],
             ['group_name'],
             ['group_title'],
             ['group_label'],
             ['name'],
             ['title'],
+            ['data', 'group_display_name'],
             ['group', 'name'],
             ['group', 'title'],
             ['group', 'label'],
+            ['payload', 'group_display_name'],
             ['data', 'group_name'],
             ['data', 'group_title'],
             ['data', 'group_label'],
