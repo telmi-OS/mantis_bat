@@ -1,0 +1,12 @@
+<FilesMatch "\.(env|sqlite|db|json|log)$">
+ Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+ RewriteEngine On
+ RewriteRule ^src(/|$) - [F,L,NC]
+ RewriteRule ^storage(/|$) - [F,L,NC]
+ RewriteRule ^templates(/|$) - [F,L,NC]
+ RewriteRule ^scripts(/|$) - [F,L,NC]
+ RewriteRule ^(\.env(\.example)?|README\.md|CHANGELOG\.md|LICENSE|NOTICE)$ - [F,L,NC]
+</IfModule>

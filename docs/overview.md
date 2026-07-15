@@ -2,19 +2,20 @@
 
 # Mantis Bat Overview
 
-Mantis Bat is the official Teleport AI connector framework for `telmi OS`.
+Mantis Bat is the official Teleport AI edge framework for `telmi OS`.
 
-Its job is clear: connect external channels to the `telmi OS` runtime without stripping away the identity, memory, governance, and execution model that makes telmi OS useful in the first place.
+Its job is clear: connect external channels and utility workflows to the `telmi OS` runtime without stripping away the identity, memory, governance, and execution model that makes telmi OS useful in the first place.
 
 ## Product Boundary
 
-Mantis Bat handles the connector edge:
+Mantis Bat handles the edge runtime:
 
 - inbound channel events
 - outbound channel delivery
 - webhook and cron runtime concerns
 - pairing and connector-level access control
 - channel-specific command routing
+- utility-tool upload and processing flows
 
 `telmi OS` handles the actual operating layer:
 
@@ -28,11 +29,15 @@ Mantis Bat handles the connector edge:
 
 ## Current Public Release
 
-The current shipped connector is a Telegram bot connector for PHP.
+The current shipped modules are:
+
+- one Telegram bot connector for PHP in `connectors/telegram/php/`
+- one RAG prep utility tool for PHP in `tools/rag-prep/php/`
 
 The repository is shaped as a connector framework, and this is what is public today:
 
 - one Telegram PHP connector module in `connectors/telegram/php/`
+- one RAG prep PHP tool in `tools/rag-prep/php/`
 - one private paired Telegram owner
 - Ghost chat submission through `POST /chat` in queued mode
 - Ghost chat history enabled in the request payload
@@ -41,6 +46,7 @@ The repository is shaped as a connector framework, and this is what is public to
 - memory upload through `bat_memory_up:`
 - pairing recovery through `pairing.php`
 - protected maintenance actions through `maintenance.php`
+- TXT, PDF, and DOCX intake for Ghost-driven telmi OS artifact generation
 
 Core flows:
 
@@ -61,6 +67,14 @@ bat_help
 ```
 
 `bat_memory_up:` sends structured memory data to Ghost API v2 instead of normal chat.
+
+The RAG prep tool uses a different flow:
+
+1. user uploads one or more source documents
+2. cron extracts and normalizes the text locally
+3. the tool sends one full normalized source document to Ghost API v2
+4. Ghost returns one plain-text telmi OS-ready artifact
+5. the user downloads the final `.txt` file
 
 ## Why Teleport AI Publishes This
 

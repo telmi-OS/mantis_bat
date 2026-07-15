@@ -48,15 +48,16 @@ It is talking to a system that already supports:
 - <img src="assets/logo/mantis-pixel-bullet.svg" width="14" alt=""> proactive inbox delivery from Ghost to channel
 - <img src="assets/logo/mantis-pixel-bullet.svg" width="14" alt=""> the same product family that also supports managed and hosted deployment paths
 
-## Current Shipping Module
+## Current Shipping Modules
 
-The current public implementation is:
+The current public implementations are:
 
 ```text
 connectors/telegram/php/
+tools/rag-prep/php/
 ```
 
-This module is built for:
+The Telegram connector is built for:
 
 - PHP 8.1+
 - SQLite
@@ -67,6 +68,22 @@ This module is built for:
 - cron or URL cron
 
 It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2.
+
+The RAG prep tool is built for:
+
+- PHP 8.1+
+- SQLite
+- cURL
+- ZipArchive
+- fileinfo
+- mbstring
+- `pdftotext`
+- HTTPS
+- standard PHP hosting
+- browser installer
+- cron or URL cron
+
+It turns uploaded TXT, PDF, and DOCX source files into one telmi OS -ready `.txt` memory artifact by extracting the text locally and letting a Ghost perform the final semantic chunking.
 
 Current operational pages include:
 
@@ -120,6 +137,8 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - [Quickstart](docs/quickstart.md)
 - [Ghost API v2](docs/ghost-api-v2.md)
 - [Self-Hosting PHP](docs/self-hosting-php.md)
+- [RAG Prep Tool](docs/rag-prep-tool.md)
+- [Self-Hosting RAG Prep PHP](docs/self-hosting-rag-prep-php.md)
 - [Security](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
@@ -143,4 +162,4 @@ Plain-language boundary:
 
 ## Status
 
-`v0.1.0` currently ships the Telegram PHP connector module in `connectors/telegram/php/` and the full self-hosted install flow around it.
+`v0.1.0` currently ships the Telegram PHP connector module in `connectors/telegram/php/`, the RAG prep PHP tool in `tools/rag-prep/php/`, and the self-hosted install flow around both.
