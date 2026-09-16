@@ -20,6 +20,9 @@ It lets a user upload TXT, PDF, and DOCX source files, extract the text locally,
 - HTTPS
 
 The PDF parser is bundled at a pinned version (`smalot/pdfparser` v2.12.5) with its LGPL-3.0 license and source metadata in `src/ThirdParty/Smalot/PdfParser/`. Runtime Composer execution is not required.
+GD is intentionally not required. `iconv` and `zlib` are expected to be supplied by the PHP base image.
+
+The tool has no runtime dependency on `shell_exec`, `exec`, `system`, `proc_open`, `popen`, `pcntl_*`, `pdftotext`, Composer execution, or OS package installation.
 
 ## What It Does
 
@@ -36,10 +39,13 @@ The PDF parser is bundled at a pinned version (`smalot/pdfparser` v2.12.5) with 
 ## Processing Model
 
 - upload one or more files into a job
+- the browser request only creates the job; one cron call processes one job
 - cron extracts the raw text locally
 - the tool normalizes the text mechanically
 - Ghost performs the semantic chunking
 - the final output is saved as one `.txt` file
+
+The dashboard is not a username-and-password login. The installer generates a private bearer URL such as `public/index.php?key=...`; opening it grants a PHP session. Anyone with that URL can use the dashboard, upload files, and download completed artifacts.
 
 ## Output Contract
 
@@ -56,6 +62,9 @@ The PDF parser is bundled at a pinned version (`smalot/pdfparser` v2.12.5) with 
 - 5 files per job
 - 120000 extracted characters per Ghost pass
 - 3 total processing attempts; transient Ghost failures retry after 1 minute and 5 minutes
+- 5-second Ghost connection timeout and 20-second total Ghost request timeout
+
+Retry state is persisted in SQLite as `attempt_count`, `next_attempt_at`, and `last_error`. Only network timeouts, connection failures, HTTP 429, and HTTP 5xx responses are retried. Invalid files, authentication failures, and other permanent 4xx responses fail immediately; no retry uses `sleep()` inside the cron request.
 
 ## Security
 
@@ -64,3 +73,15 @@ The PDF parser is bundled at a pinned version (`smalot/pdfparser` v2.12.5) with 
 - keep Ghost JWT private
 - keep dashboard, cron, health, status, and maintenance URLs private
 - validate file types and sizes before processing
+
+## Hades Compatibility Test
+
+From this directory:
+
+```bash
+php \
+  -d disable_functions=exec,shell_exec,system,passthru,popen,proc_open,proc_get_status,proc_terminate,pcntl_exec,pcntl_fork,dl \
+  public/install.php
+```
+
+The CI test additionally verifies TXT, DOCX, text-based PDF, encrypted-PDF, OCR-required PDF, retry, and forbidden-process-call behavior.
