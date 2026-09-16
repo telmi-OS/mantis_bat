@@ -132,6 +132,16 @@ PROMPT;
         $url = $result['url'];
         $contentType = $result['content_type'];
 
+        if ($status === 429 || $status >= 500) {
+            $message = sprintf('Ghost API temporarily unavailable. URL: %s Status: %d.', $url, $status);
+            $this->logger?->warning('Ghost API returned a retryable response.', [
+                'path' => $path,
+                'url' => $url,
+                'status' => $status,
+            ]);
+            throw new RetryableException($message);
+        }
+
         $decoded = json_decode($body, true);
         if (!is_array($decoded)) {
             $preview = $this->previewBody($body);
@@ -163,6 +173,10 @@ PROMPT;
     private function rawRequest(string $method, string $path, array $payload = [], array $query = []): array
     {
         $base = rtrim((string) $this->config->require('ghost.api_base'), '/');
+        if (strtolower((string) parse_url($base, PHP_URL_SCHEME)) !== 'https') {
+            throw new RuntimeException('Ghost API base URL must use HTTPS.');
+        }
+
         $url = $base . '/' . ltrim($path, '/');
         if ($query !== []) {
             $query = array_filter($query, static fn($value) => $value !== '');
@@ -178,7 +192,8 @@ PROMPT;
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 120,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 20,
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_HEADER => true,
@@ -190,11 +205,16 @@ PROMPT;
 
         $response = curl_exec($ch);
         $error = curl_error($ch);
+        $curlErrorNumber = curl_errno($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $headerSize = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
         curl_close($ch);
 
         if ($response === false) {
+            if ($this->isRetryableCurlError($curlErrorNumber)) {
+                throw new RetryableException('Ghost API request failed and can be retried: ' . $error);
+            }
+
             throw new RuntimeException('Ghost API request failed: ' . $error);
         }
 
@@ -247,5 +267,19 @@ PROMPT;
         }
 
         return $value;
+    }
+
+    private function isRetryableCurlError(int $errorNumber): bool
+    {
+        return in_array($errorNumber, [
+            CURLE_COULDNT_CONNECT,
+            CURLE_COULDNT_RESOLVE_HOST,
+            CURLE_COULDNT_RESOLVE_PROXY,
+            CURLE_GOT_NOTHING,
+            CURLE_OPERATION_TIMEDOUT,
+            CURLE_PARTIAL_FILE,
+            CURLE_RECV_ERROR,
+            CURLE_SEND_ERROR,
+        ], true);
     }
 }

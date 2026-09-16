@@ -37,3 +37,22 @@ function ragPrepRequireAccess(MantisBat\RuntimeConfig $config, MantisBat\Securit
         exit;
     }
 }
+
+function ragPrepIniBytes(string $value): int
+{
+    $value = trim($value);
+    if ($value === '' || $value === '0') {
+        return 0;
+    }
+
+    $suffix = strtolower(substr($value, -1));
+    $number = (float) $value;
+    $multiplier = match ($suffix) {
+        'g' => 1024 * 1024 * 1024,
+        'm' => 1024 * 1024,
+        'k' => 1024,
+        default => 1,
+    };
+
+    return (int) ($number * $multiplier);
+}

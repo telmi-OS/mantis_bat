@@ -7,7 +7,10 @@ namespace MantisBat;
 use DOMDocument;
 use DOMXPath;
 use RuntimeException;
+use Smalot\PdfParser\Parser as PdfParser;
 use ZipArchive;
+
+require_once __DIR__ . '/ThirdParty/smalot-autoload.php';
 
 final class DocumentExtractor
 {
@@ -51,13 +54,31 @@ final class DocumentExtractor
 
     private function extractPdf(string $path): string
     {
-        $command = sprintf('pdftotext -enc UTF-8 %s - 2>/dev/null', escapeshellarg($path));
-        $output = shell_exec($command);
-        if (!is_string($output) || trim($output) === '') {
-            throw new RuntimeException('PDF extraction failed. Check pdftotext availability and source file quality.');
+        $contents = file_get_contents($path);
+        if ($contents === false) {
+            throw new RuntimeException('Could not read uploaded PDF file.');
         }
 
-        return $this->toUtf8($output);
+        try {
+            $document = (new PdfParser())->parseContent($contents);
+            $text = $document->getText();
+        } catch (\Throwable $exception) {
+            if (stripos($exception->getMessage(), 'secur') !== false) {
+                throw new RuntimeException('Encrypted PDFs are not supported.', 0, $exception);
+            }
+
+            $this->logger?->warning('Pure-PHP PDF extraction failed.', [
+                'path' => $path,
+                'exception' => $exception::class,
+            ]);
+            throw new RuntimeException('PDF extraction failed. The file may be malformed or use an unsupported PDF feature.', 0, $exception);
+        }
+
+        if (trim($text) === '') {
+            throw new RuntimeException('This PDF contains no extractable text. Scanned or image-only PDFs require OCR, which is not supported by this tool.');
+        }
+
+        return $this->toUtf8($text);
     }
 
     private function extractDocx(string $path): string
@@ -75,7 +96,7 @@ final class DocumentExtractor
         }
 
         $dom = new DOMDocument();
-        $loaded = @$dom->loadXML($documentXml);
+        $loaded = @$dom->loadXML($documentXml, LIBXML_NONET | LIBXML_NOBLANKS);
         if ($loaded !== true) {
             throw new RuntimeException('DOCX XML could not be parsed.');
         }

@@ -42,6 +42,9 @@ final class Storage
                 source_text_path TEXT,
                 output_text_path TEXT,
                 error_message TEXT,
+                last_error TEXT,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 started_at INTEGER,
@@ -65,10 +68,14 @@ final class Storage
         ];
 
         foreach ($queries as $query) {
-            $this->pdo->exec($query);
+            $this->pdo->query($query);
         }
 
-        $this->pdo->exec('PRAGMA foreign_keys = ON');
+        $this->ensureColumn('jobs', 'last_error', 'TEXT');
+        $this->ensureColumn('jobs', 'attempt_count', 'INTEGER NOT NULL DEFAULT 0');
+        $this->ensureColumn('jobs', 'next_attempt_at', 'INTEGER NOT NULL DEFAULT 0');
+
+        $this->pdo->query('PRAGMA foreign_keys = ON');
     }
 
     public function insertLog(string $level, string $message, string $contextJson, int $createdAt): void
@@ -104,12 +111,14 @@ final class Storage
     public function createJob(string $jobUuid, string $title, string $guidance): int
     {
         $now = time();
-        $stmt = $this->pdo->prepare('INSERT INTO jobs (job_uuid, title, guidance, status, created_at, updated_at) VALUES (:job_uuid, :title, :guidance, :status, :created_at, :updated_at)');
+        $stmt = $this->pdo->prepare('INSERT INTO jobs (job_uuid, title, guidance, status, attempt_count, next_attempt_at, created_at, updated_at) VALUES (:job_uuid, :title, :guidance, :status, :attempt_count, :next_attempt_at, :created_at, :updated_at)');
         $stmt->execute([
             ':job_uuid' => $jobUuid,
             ':title' => $title,
             ':guidance' => $guidance,
             ':status' => 'uploaded',
+            ':attempt_count' => 0,
+            ':next_attempt_at' => $now,
             ':created_at' => $now,
             ':updated_at' => $now,
         ]);
@@ -171,21 +180,55 @@ final class Storage
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    public function nextPendingJob(): ?array
+    public function nextPendingJob(int $maxAttempts = 3, int $staleAfterSeconds = 60, int $staleRetryDelaySeconds = 60): ?array
     {
-        $stmt = $this->pdo->query("SELECT * FROM jobs WHERE status = 'uploaded' ORDER BY created_at ASC LIMIT 1");
+        $this->recoverStaleJobs($maxAttempts, $staleAfterSeconds, $staleRetryDelaySeconds);
+
+        $stmt = $this->pdo->prepare("SELECT * FROM jobs WHERE status IN ('uploaded', 'retryable') AND attempt_count < :max_attempts AND next_attempt_at <= :now ORDER BY created_at ASC LIMIT 1");
+        $stmt->execute([
+            ':max_attempts' => $maxAttempts,
+            ':now' => time(),
+        ]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
+    }
+
+    public function beginJobAttempt(int $jobId): void
+    {
+        $now = time();
+        $stmt = $this->pdo->prepare("UPDATE jobs SET status = 'extracting', attempt_count = attempt_count + 1, next_attempt_at = 0, updated_at = :updated_at, started_at = COALESCE(started_at, :started_at), completed_at = NULL WHERE id = :id AND status IN ('uploaded', 'retryable')");
+        $stmt->execute([
+            ':updated_at' => $now,
+            ':started_at' => $now,
+            ':id' => $jobId,
+        ]);
+
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException('Job is no longer pending.');
+        }
     }
 
     public function updateJobStatus(int $jobId, string $status, ?string $errorMessage = null): void
     {
         $now = time();
-        $stmt = $this->pdo->prepare('UPDATE jobs SET status = :status, error_message = :error_message, updated_at = :updated_at, started_at = CASE WHEN :status = \'extracting\' AND started_at IS NULL THEN :updated_at ELSE started_at END, completed_at = CASE WHEN :status IN (\'completed\', \'failed\') THEN :updated_at ELSE completed_at END WHERE id = :id');
+        $stmt = $this->pdo->prepare('UPDATE jobs SET status = :status, error_message = :error_message, last_error = :last_error, next_attempt_at = 0, updated_at = :updated_at, started_at = CASE WHEN :status = \'extracting\' AND started_at IS NULL THEN :updated_at ELSE started_at END, completed_at = CASE WHEN :status IN (\'completed\', \'failed\') THEN :updated_at ELSE completed_at END WHERE id = :id');
         $stmt->execute([
             ':status' => $status,
             ':error_message' => $errorMessage,
+            ':last_error' => $errorMessage,
             ':updated_at' => $now,
+            ':id' => $jobId,
+        ]);
+    }
+
+    public function markRetryable(int $jobId, string $errorMessage, int $nextAttemptAt): void
+    {
+        $stmt = $this->pdo->prepare("UPDATE jobs SET status = 'retryable', error_message = :error_message, last_error = :last_error, next_attempt_at = :next_attempt_at, updated_at = :updated_at, completed_at = NULL WHERE id = :id");
+        $stmt->execute([
+            ':error_message' => $errorMessage,
+            ':last_error' => $errorMessage,
+            ':next_attempt_at' => $nextAttemptAt,
+            ':updated_at' => time(),
             ':id' => $jobId,
         ]);
     }
@@ -239,8 +282,8 @@ final class Storage
     {
         $this->pdo->beginTransaction();
         try {
-            $this->pdo->exec('DELETE FROM job_files');
-            $this->pdo->exec('DELETE FROM jobs');
+            $this->pdo->query('DELETE FROM job_files');
+            $this->pdo->query('DELETE FROM jobs');
             $this->commitTransaction();
         } catch (\Throwable $exception) {
             $this->pdo->rollBack();
@@ -250,17 +293,17 @@ final class Storage
 
     public function deleteCompletedJobs(): void
     {
-        $this->pdo->exec("DELETE FROM jobs WHERE status = 'completed'");
+        $this->pdo->query("DELETE FROM jobs WHERE status = 'completed'");
     }
 
     public function deleteFailedJobs(): void
     {
-        $this->pdo->exec("DELETE FROM jobs WHERE status = 'failed'");
+        $this->pdo->query("DELETE FROM jobs WHERE status = 'failed'");
     }
 
     public function countJobs(): array
     {
-        $statuses = ['uploaded', 'extracting', 'processing', 'completed', 'failed'];
+        $statuses = ['uploaded', 'extracting', 'processing', 'retryable', 'completed', 'failed'];
         $counts = [];
         foreach ($statuses as $status) {
             $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM jobs WHERE status = :status');
@@ -309,5 +352,39 @@ final class Storage
     private function commitTransaction(): void
     {
         $this->pdo->commit();
+    }
+
+    private function recoverStaleJobs(int $maxAttempts, int $staleAfterSeconds, int $staleRetryDelaySeconds): void
+    {
+        $staleBefore = time() - max(1, $staleAfterSeconds);
+        $stmt = $this->pdo->prepare("SELECT id, attempt_count FROM jobs WHERE status IN ('extracting', 'processing') AND updated_at < :stale_before");
+        $stmt->execute([':stale_before' => $staleBefore]);
+
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $job) {
+            $jobId = (int) $job['id'];
+            $attemptCount = (int) $job['attempt_count'];
+            $message = 'The previous worker attempt was interrupted or exceeded the execution budget.';
+            if ($attemptCount < $maxAttempts) {
+                $this->markRetryable($jobId, $message, time() + max(0, $staleRetryDelaySeconds));
+                continue;
+            }
+
+            $this->updateJobStatus($jobId, 'failed', $message);
+        }
+    }
+
+    private function ensureColumn(string $table, string $column, string $definition): void
+    {
+        $stmt = $this->pdo->query('PRAGMA table_info(' . $table . ')');
+        $columns = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $columns[] = (string) ($row['name'] ?? '');
+        }
+
+        if (in_array($column, $columns, true)) {
+            return;
+        }
+
+        $this->pdo->query(sprintf('ALTER TABLE %s ADD COLUMN %s %s', $table, $column, $definition));
     }
 }

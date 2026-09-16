@@ -10,9 +10,11 @@ The RAG prep tool is a normal PHP app.
 - `cURL`
 - `PDO_SQLite`
 - `ZipArchive`
+- `DOMDocument`
 - `fileinfo`
 - `mbstring`
-- `pdftotext`
+- `iconv`
+- `zlib`
 - HTTPS
 - writable `storage/`
 - cron access, either CLI cron or URL cron
@@ -81,6 +83,10 @@ Treat those URLs like credentials.
 - cron sends the normalized text to Ghost API v2
 - Ghost returns the final RAG-ready plain-text artifact
 - users download the resulting `.txt` file from the dashboard
+
+The tool supports text-based PDFs only. Encrypted PDFs are rejected, and scanned/image-only PDFs require OCR, which is not included. Each job is limited to 7 MiB per file and 7 MiB combined, and transient Ghost failures are retried up to three total attempts without sleeping inside the cron request.
+
+The bundled PDF parser is `smalot/pdfparser` v2.12.5, pinned under `src/ThirdParty/Smalot/PdfParser/`; Composer is not executed at runtime.
 
 ## Maintenance
 

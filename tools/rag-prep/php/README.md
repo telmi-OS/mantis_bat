@@ -12,10 +12,14 @@ It lets a user upload TXT, PDF, and DOCX source files, extract the text locally,
 - cURL
 - SQLite
 - ZipArchive
+- DOMDocument
 - fileinfo
 - mbstring
-- `pdftotext`
+- iconv
+- zlib
 - HTTPS
+
+The PDF parser is bundled at a pinned version (`smalot/pdfparser` v2.12.5) with its LGPL-3.0 license and source metadata in `src/ThirdParty/Smalot/PdfParser/`. Runtime Composer execution is not required.
 
 ## What It Does
 
@@ -23,6 +27,8 @@ It lets a user upload TXT, PDF, and DOCX source files, extract the text locally,
 - accepts TXT, PDF, and DOCX uploads
 - stores upload jobs locally
 - extracts source text locally
+- extracts text-based PDFs with the bundled pure-PHP parser
+- rejects encrypted PDFs and reports that scanned/image-only PDFs require OCR
 - sends the normalized source text plus fixed RAG guidance to Ghost API v2
 - saves one final `.txt` artifact per job
 - exposes private cron, status, health, and maintenance pages
@@ -45,10 +51,11 @@ It lets a user upload TXT, PDF, and DOCX source files, extract the text locally,
 
 ## Limits In v0.1.0
 
-- 15 MB per file
-- 20 MB total per job
+- 7 MiB per file
+- 7 MiB total per job
 - 5 files per job
 - 120000 extracted characters per Ghost pass
+- 3 total processing attempts; transient Ghost failures retry after 1 minute and 5 minutes
 
 ## Security
 

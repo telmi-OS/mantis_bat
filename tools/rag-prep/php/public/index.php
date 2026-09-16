@@ -43,6 +43,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (!isset($_FILES['documents']) || !is_array($_FILES['documents']['name'] ?? null)) {
+            $contentLength = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+            $postMaxBytes = ragPrepIniBytes((string) ini_get('post_max_size'));
+            if ($contentLength > 0 && $postMaxBytes > 0 && $contentLength > $postMaxBytes) {
+                throw new RuntimeException('The upload request exceeds the server PHP request limit. Keep the combined file size at or below 7 MiB.');
+            }
+
             throw new RuntimeException('Select at least one document.');
         }
 
@@ -56,17 +62,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new RuntimeException(sprintf('Each job must contain between 1 and %d files.', $maxFiles));
         }
 
-        $maxFileSizeBytes = (int) $config->get('limits.max_file_size_mb', 15) * 1024 * 1024;
-        $maxJobSizeBytes = (int) $config->get('limits.max_job_size_mb', 20) * 1024 * 1024;
+        $hardUploadLimitMb = 7;
+        $maxFileSizeMb = min($hardUploadLimitMb, max(1, (int) $config->get('limits.max_file_size_mb', $hardUploadLimitMb)));
+        $maxJobSizeMb = min($hardUploadLimitMb, max(1, (int) $config->get('limits.max_job_size_mb', $hardUploadLimitMb)));
+        $maxFileSizeBytes = $maxFileSizeMb * 1024 * 1024;
+        $maxJobSizeBytes = $maxJobSizeMb * 1024 * 1024;
         $allowedExtensions = ['txt', 'pdf', 'docx'];
-        $jobUuid = $security->randomToken(12);
-        $uploadDir = $installer->uploadsPath() . '/' . $jobUuid;
-        if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true) && !is_dir($uploadDir)) {
-            throw new RuntimeException('Could not create upload directory.');
-        }
-
-        $jobId = $storage->createJob($jobUuid, $title, $guidance);
         $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $validatedFiles = [];
         $totalBytes = 0;
 
         foreach ($fileNames as $index => $originalName) {
@@ -76,13 +79,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = isset($errors[$index]) ? (int) $errors[$index] : UPLOAD_ERR_NO_FILE;
 
             if ($error !== UPLOAD_ERR_OK) {
+                if ($error === UPLOAD_ERR_INI_SIZE || $error === UPLOAD_ERR_FORM_SIZE) {
+                    throw new RuntimeException('One of the uploaded files exceeds the server upload limit. Keep the combined file size at or below 7 MiB.');
+                }
+
                 throw new RuntimeException('One of the uploaded files failed during upload.');
             }
             if ($originalName === '' || $tmpName === '' || !is_uploaded_file($tmpName)) {
                 throw new RuntimeException('Uploaded file data is invalid.');
             }
             if ($size <= 0 || $size > $maxFileSizeBytes) {
-                throw new RuntimeException(sprintf('Each file must be between 1 byte and %d MB.', (int) $config->get('limits.max_file_size_mb', 15)));
+                throw new RuntimeException(sprintf('Each file must be between 1 byte and %d MiB.', $maxFileSizeMb));
             }
 
             $extension = mb_strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
@@ -92,17 +99,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $totalBytes += $size;
             if ($totalBytes > $maxJobSizeBytes) {
-                throw new RuntimeException(sprintf('Combined job upload size exceeds %d MB.', (int) $config->get('limits.max_job_size_mb', 20)));
+                throw new RuntimeException(sprintf('Combined job upload size exceeds %d MiB.', $maxJobSizeMb));
             }
 
-            $mimeType = (string) $finfo->file($tmpName);
-            $storedName = sprintf('%02d-%s.%s', $index + 1, $security->randomToken(6), $extension);
+            $validatedFiles[] = [
+                'index' => $index,
+                'original_name' => $originalName,
+                'tmp_name' => $tmpName,
+                'size' => $size,
+                'mime_type' => (string) $finfo->file($tmpName),
+                'extension' => $extension,
+            ];
+        }
+
+        $jobUuid = $security->randomToken(12);
+        $uploadDir = $installer->uploadsPath() . '/' . $jobUuid;
+        if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true) && !is_dir($uploadDir)) {
+            throw new RuntimeException('Could not create upload directory.');
+        }
+
+        $jobId = $storage->createJob($jobUuid, $title, $guidance);
+        foreach ($validatedFiles as $file) {
+            $storedName = sprintf('%02d-%s.%s', (int) $file['index'] + 1, $security->randomToken(6), $file['extension']);
             $storedPath = $uploadDir . '/' . $storedName;
-            if (!move_uploaded_file($tmpName, $storedPath)) {
+            if (!move_uploaded_file($file['tmp_name'], $storedPath)) {
                 throw new RuntimeException('Could not move uploaded file into storage.');
             }
 
-            $storage->addJobFile($jobId, $originalName, $storedPath, $mimeType, $extension, $size);
+            $storage->addJobFile($jobId, $file['original_name'], $storedPath, $file['mime_type'], $file['extension'], $file['size']);
         }
 
         $message = 'Job created. Cron will extract the documents and ask your Ghost to build the final telmi OS-ready txt artifact.';
@@ -113,8 +137,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $jobs = $storage->listJobs();
 $limits = [
-    'max_file_size_mb' => (int) $config->get('limits.max_file_size_mb', 15),
-    'max_job_size_mb' => (int) $config->get('limits.max_job_size_mb', 20),
+    'max_file_size_mb' => min(7, max(1, (int) $config->get('limits.max_file_size_mb', 7))),
+    'max_job_size_mb' => min(7, max(1, (int) $config->get('limits.max_job_size_mb', 7))),
     'max_files_per_job' => (int) $config->get('limits.max_files_per_job', 5),
     'max_source_characters' => (int) $config->get('limits.max_source_characters', 120000),
 ];
@@ -143,7 +167,7 @@ $limits = [
         <div class="hero-grid">
             <div class="copy">
                 <p>Upload TXT, PDF, and DOCX documents. The tool extracts the text locally, sends one normalized source document to your Ghost, and saves one telmi OS-ready `.txt` artifact with semantically chunked memory blocks.</p>
-                <p>Limits: <?= $limits['max_files_per_job'] ?> files per job, <?= $limits['max_file_size_mb'] ?> MB per file, <?= $limits['max_job_size_mb'] ?> MB per job, <?= number_format($limits['max_source_characters']) ?> extracted characters per Ghost pass.</p>
+                <p>Limits: <?= $limits['max_files_per_job'] ?> files per job, <?= $limits['max_file_size_mb'] ?> MiB per file, <?= $limits['max_job_size_mb'] ?> MiB per job, <?= number_format($limits['max_source_characters']) ?> extracted characters per Ghost pass.</p>
             </div>
             <div class="hero-shot">
                 <img src="assets/telmi-os-desktop.png" alt="telmi OS desktop">
@@ -163,6 +187,7 @@ $limits = [
             <h2><span class="gradient-text">Create Job</span></h2>
             <form method="post" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="MAX_FILE_SIZE" value="7340032">
                 <label>
                     Job Title
                     <input type="text" name="title" value="" maxlength="180" required>

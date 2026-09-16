@@ -49,7 +49,7 @@ $defaults = [
     'installer_secret' => (string) ($_POST['installer_secret'] ?? $security->randomToken(10)),
 ];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     try {
         $postedCsrf = isset($_POST['csrf_token']) && is_string($_POST['csrf_token']) ? $_POST['csrf_token'] : '';
         if (!$security->constantTimeEquals($csrfToken, $postedCsrf)) {
@@ -76,6 +76,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new RuntimeException('App base URL must be a valid absolute URL.');
         }
 
+        $ghostApiBase = rtrim(trim($defaults['ghost_api_base']), '/');
+        if ($ghostApiBase === '' || !filter_var($ghostApiBase, FILTER_VALIDATE_URL) || strtolower((string) parse_url($ghostApiBase, PHP_URL_SCHEME)) !== 'https') {
+            throw new RuntimeException('Ghost API base URL must be a valid HTTPS URL.');
+        }
+
         $accessSecret = $security->randomToken(12);
         $config = [
             'app' => [
@@ -91,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'version' => '0.1.0',
             ],
             'ghost' => [
-                'api_base' => rtrim(trim($defaults['ghost_api_base']), '/'),
+                'api_base' => $ghostApiBase,
                 'api_token' => trim($defaults['ghost_api_token']),
                 'paths' => [
                     'chat' => '/chat',
@@ -99,11 +104,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ],
             ],
             'limits' => [
-                'max_file_size_mb' => 15,
-                'max_job_size_mb' => 20,
+                'max_file_size_mb' => 7,
+                'max_job_size_mb' => 7,
                 'max_files_per_job' => 5,
                 'max_source_characters' => 120000,
                 'worker_jobs_per_run' => 1,
+                'max_attempts' => 3,
+                'retry_delays_seconds' => [60, 300],
+                'stale_job_seconds' => 60,
             ],
             'features' => [
                 'pdf_support' => true,

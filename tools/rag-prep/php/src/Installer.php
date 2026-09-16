@@ -16,22 +16,28 @@ final class Installer
 
     public function requirements(): array
     {
-        $storageDir = $this->moduleRoot . '/storage';
-        if (!is_dir($storageDir)) {
-            @mkdir($storageDir, 0775, true);
+        $runtimeDirectories = [
+            'storage_writable' => $this->moduleRoot . '/storage',
+            'jobs_writable' => $this->jobsPath(),
+            'uploads_writable' => $this->uploadsPath(),
+        ];
+        $directoryRequirements = [];
+        foreach ($runtimeDirectories as $name => $path) {
+            $directoryRequirements[$name] = $this->ensureWritableDirectory($path);
         }
 
-        return [
+        return array_merge([
             'php_version' => PHP_VERSION_ID >= 80100,
             'curl' => extension_loaded('curl'),
+            'pdo' => class_exists(\PDO::class),
             'sqlite' => extension_loaded('pdo_sqlite'),
             'zip' => class_exists(\ZipArchive::class),
             'dom' => class_exists(\DOMDocument::class),
             'mbstring' => extension_loaded('mbstring'),
+            'iconv' => extension_loaded('iconv'),
+            'zlib' => extension_loaded('zlib'),
             'fileinfo' => extension_loaded('fileinfo'),
-            'pdftotext' => $this->hasBinary('pdftotext'),
-            'storage_writable' => is_dir($storageDir) && is_writable($storageDir),
-        ];
+        ], $directoryRequirements);
     }
 
     public function allRequirementsPass(): bool
@@ -121,11 +127,13 @@ final class Installer
         $this->deleteDirectory($this->uploadsPath());
     }
 
-    private function hasBinary(string $binary): bool
+    private function ensureWritableDirectory(string $path): bool
     {
-        $command = sprintf('command -v %s 2>/dev/null', escapeshellarg($binary));
-        $output = shell_exec($command);
-        return is_string($output) && trim($output) !== '';
+        if (!is_dir($path) && !@mkdir($path, 0775, true) && !is_dir($path)) {
+            return false;
+        }
+
+        return is_writable($path);
     }
 
     private function deleteDirectory(string $path): void

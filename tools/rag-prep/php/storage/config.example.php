@@ -22,11 +22,14 @@ return [
         ],
     ],
     'limits' => [
-        'max_file_size_mb' => 15,
-        'max_job_size_mb' => 20,
+        'max_file_size_mb' => 7,
+        'max_job_size_mb' => 7,
         'max_files_per_job' => 5,
         'max_source_characters' => 120000,
         'worker_jobs_per_run' => 1,
+        'max_attempts' => 3,
+        'retry_delays_seconds' => [60, 300],
+        'stale_job_seconds' => 60,
     ],
     'features' => [
         'pdf_support' => true,

@@ -1,0 +1,48 @@
+name: RAG Prep Hades compatibility
+
+on:
+  push:
+    paths:
+      - 'tools/rag-prep/php/**'
+      - '.github/workflows/rag-prep-hades.yml'
+  pull_request:
+    paths:
+      - 'tools/rag-prep/php/**'
+      - '.github/workflows/rag-prep-hades.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  hades:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php-version: ['8.1', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          extensions: curl, dom, fileinfo, iconv, mbstring, pdo_sqlite, zip
+          coverage: none
+
+      - name: Lint PHP sources
+        working-directory: tools/rag-prep/php
+        run: find . -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Render installer with Hades restrictions
+        working-directory: tools/rag-prep/php
+        run: |
+          php \
+            -d disable_functions=exec,shell_exec,system,passthru,popen,proc_open,proc_get_status,proc_terminate,pcntl_exec,pcntl_fork,dl \
+            public/install.php
+
+      - name: Run extraction and retry compatibility checks
+        working-directory: tools/rag-prep/php
+        run: |
+          php \
+            -d disable_functions=exec,shell_exec,system,passthru,popen,proc_open,proc_get_status,proc_terminate,pcntl_exec,pcntl_fork,dl \
+            tests/hades_compatibility.php

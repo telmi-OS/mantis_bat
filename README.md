@@ -90,13 +90,15 @@ The RAG prep tool is built for:
 - ZipArchive
 - fileinfo
 - mbstring
-- `pdftotext`
+- DOMDocument
+- iconv
+- zlib
 - HTTPS
 - standard PHP hosting
 - browser installer
 - cron or URL cron
 
-It turns uploaded TXT, PDF, and DOCX source files into one telmi OS -ready `.txt` memory artifact by extracting the text locally and letting a Ghost perform the final semantic chunking.
+It turns uploaded TXT, PDF, and DOCX source files into one telmi OS-ready `.txt` memory artifact by extracting the text locally and letting a Ghost perform the final semantic chunking. Text-based PDFs are handled by a bundled pure-PHP parser; encrypted and scanned/image-only PDFs are rejected with an explicit message.
 
 Current operational pages include:
 

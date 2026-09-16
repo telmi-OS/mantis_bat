@@ -13,6 +13,7 @@ foreach ([
     'GhostClient',
     'DocumentExtractor',
     'JobProcessor',
+    'RetryableException',
 ] as $classFile) {
     require_once $moduleRoot . '/src/' . $classFile . '.php';
 }

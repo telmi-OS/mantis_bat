@@ -50,8 +50,8 @@ It is asked to produce self-contained semantic memory blocks that:
 
 ## Current Limits
 
-- 15 MB per file
-- 20 MB total upload size per job
+- 7 MiB per file
+- 7 MiB total upload size per job
 - 5 files per job
 - 120000 extracted characters per Ghost pass
 
@@ -64,6 +64,9 @@ It is asked to produce self-contained semantic memory blocks that:
 
 ## Operational Notes
 
-- PDF extraction currently depends on `pdftotext`
-- DOCX extraction uses `ZipArchive`
+- PDF extraction uses a bundled, pinned pure-PHP parser for text-based PDFs
+- encrypted PDFs are rejected explicitly
+- scanned/image-only PDFs require OCR, which is outside the current runtime contract
+- DOCX extraction uses `ZipArchive` and `DOMDocument`
+- transient Ghost failures retry up to three total attempts with persisted backoff
 - text chunking is semantic and Ghost-driven, not local regex slicing
