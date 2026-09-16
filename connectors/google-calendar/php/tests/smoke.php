@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+$services = require dirname(__DIR__) . '/src/bootstrap.php';
+foreach (['config', 'installer', 'auth'] as $service) {
+    if (!array_key_exists($service, $services)) {
+        throw new RuntimeException('Bootstrap did not expose the expected service: ' . $service);
+    }
+}
+
 foreach (['Crypto', 'Storage', 'PromptBuilder', 'GoogleClient'] as $file) {
     require_once dirname(__DIR__) . '/src/' . $file . '.php';
 }

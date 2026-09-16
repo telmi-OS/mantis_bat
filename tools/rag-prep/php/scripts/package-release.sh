@@ -4,14 +4,14 @@ set -euo pipefail
 
 VERSION="${1:-0.1.0}"
 ROOT_DIR="$(cd "$(dirname "$0")/../../../.." && pwd)"
-MODULE_DIR="$ROOT_DIR/connectors/telegram/php"
+MODULE_DIR="$ROOT_DIR/tools/rag-prep/php"
 DIST_DIR="$ROOT_DIR/dist"
-ZIP_NAME="mantis-bat-telegram-php-v${VERSION}.zip"
+ZIP_NAME="mantis-bat-rag-prep-php-v${VERSION}.zip"
 TMP_DIR="$DIST_DIR/package-tmp"
 
 rm -rf "$TMP_DIR"
 mkdir -p "$TMP_DIR" "$DIST_DIR"
-cp -R "$MODULE_DIR" "$TMP_DIR/telegram-php"
+cp -R "$MODULE_DIR" "$TMP_DIR/rag-prep-php"
 
 find "$TMP_DIR" \
   -name ".DS_Store" -o \
@@ -25,7 +25,7 @@ find "$TMP_DIR" \
       rm -rf "$path"
     done
 
-(cd "$TMP_DIR" && zip -rq "$DIST_DIR/$ZIP_NAME" telegram-php)
+(cd "$TMP_DIR" && zip -rq "$DIST_DIR/$ZIP_NAME" rag-prep-php)
 rm -rf "$TMP_DIR"
 
 echo "Created $DIST_DIR/$ZIP_NAME"

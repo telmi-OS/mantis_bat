@@ -4,6 +4,9 @@
 config.php
 config.local.php
 
+# Source class with a capitalized name; keep generated runtime config files ignored.
+!connectors/google-calendar/php/src/Config.php
+
 # Runtime storage
 *.sqlite
 *.sqlite3
