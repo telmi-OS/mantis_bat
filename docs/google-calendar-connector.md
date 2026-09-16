@@ -40,6 +40,72 @@ The Google OAuth callback is:
 
 Register that exact URL in the Google Cloud OAuth client. The connector requests read-only Calendar access with offline access so cron can refresh the access token.
 
+## Google Cloud OAuth setup
+
+The connector uses Google's server-side OAuth 2.0 flow. It requests these read-only scopes:
+
+- `https://www.googleapis.com/auth/calendar.readonly` to read calendar events
+- `https://www.googleapis.com/auth/calendar.calendarlist.readonly` to list calendars for the one-calendar selection
+
+It never writes to Google Calendar. Keep the client secret private and do not commit it to the repository.
+
+### 1. Create a Google Cloud project and enable Calendar API
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a project or select the project that will own this connector's OAuth client.
+3. Open **APIs & Services → Library**, find **Google Calendar API**, and click **Enable**. Google also documents this in its [Calendar API quickstart](https://developers.google.com/workspace/calendar/api/quickstart/js#enable_the_api).
+
+### 2. Configure the OAuth consent screen
+
+Open **Google Auth platform** in the Cloud Console and complete **Branding**. Enter an app name, a support email, and a developer contact email. Google's [OAuth consent configuration guide](https://developers.google.com/workspace/guides/configure-oauth-consent) describes the current screens.
+
+Choose the audience that matches the Google accounts that will use this installation:
+
+- **Internal** is only available for Google Workspace or Cloud Identity accounts in the same organization as the project.
+- **External** is required for personal Google accounts or accounts outside that organization.
+
+For an **External** app that is still in **Testing**, open **Audience → Test users → Add users** and add every Google account that will connect a calendar. Google shows an unverified-app warning in this mode, and test-user authorizations (including offline refresh tokens) expire after seven days. For unattended cron operation beyond testing, publish the app to **In production** and follow Google's verification requirements where applicable. See [Google's audience and publishing guidance](https://support.google.com/cloud/answer/15549945).
+
+Under **Data Access**, add the two exact scopes listed above. Requesting the narrower read-only scopes keeps the connector's access limited; see Google's [Calendar API scope reference](https://developers.google.com/workspace/calendar/api/auth).
+
+### 3. Create the web application client
+
+1. In **Google Auth platform → Clients**, click **Create client**.
+2. Select **Web application**.
+3. Give the client a recognizable name, such as `Mantis Bat Google Calendar`.
+4. Under **Authorized redirect URIs**, add the callback URL that the installer displays or that you derive from the configured base URL:
+
+   ```text
+   https://calendar.example.com/oauth_callback.php
+   ```
+
+   For a subdirectory installation, include the complete path:
+
+   ```text
+   https://example.com/connectors/google-calendar/public/oauth_callback.php
+   ```
+
+   The value must match exactly, including `https`, hostname, port, path, and trailing slash. Do not register `install.php`, `oauth_start.php`, or the application root. Authorized JavaScript origins are not needed for this server-side flow.
+
+5. Click **Create** and copy the generated **Client ID** and **Client secret**.
+
+### 4. Connect the calendar in Mantis Bat
+
+1. Open the connector's `public/install.php` page.
+2. Set **Application base URL** to the public URL of the connector, without a trailing slash. The callback is then `<application-base-url>/oauth_callback.php`.
+3. Paste the Google **Client ID** and **Client secret** into the installer, finish the other settings, and install.
+4. Log in to the dashboard and click **Connect Google**.
+5. Sign in with the Google account you added as a test user (when applicable), review the requested read-only permissions, and approve them.
+6. Select exactly one calendar from the list and save it.
+
+### Troubleshooting OAuth setup
+
+- **`redirect_uri_mismatch`**: compare the URL in the error with the client's Authorized redirect URI. They must be identical.
+- **`access_denied`** or an app-not-available message: check the OAuth audience and, for an External Testing app, confirm that the Google account is listed under Test users.
+- **Calendar API not enabled**: enable Google Calendar API in the same Cloud project that owns the OAuth client.
+- **`invalid_grant`** or a later cron authentication error: the user may have revoked access or a testing-mode refresh token may have expired. Reconnect Google; for long-running use, publish the OAuth app.
+- **No calendars are listed**: confirm that the authorized Google account can open the intended calendar and that the Calendar API scope was granted.
+
 ## Cron
 
 The installer displays a private URL like:
