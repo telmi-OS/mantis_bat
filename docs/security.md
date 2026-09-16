@@ -22,6 +22,8 @@ Baseline controls:
 - secret-protected status and health endpoints
 - secret-protected pairing recovery and maintenance endpoints
 - secret redaction in logs
+- encrypted Google Calendar connector settings, event payloads, prompts, and sync errors
+- private cron unlock key outside the public directory
 
 ## Secrets
 
@@ -32,6 +34,7 @@ Never commit:
 - runtime `config.php`
 - SQLite database files
 - logs with sensitive payloads
+- Google OAuth client secrets and refresh tokens
 
 ## Deployment Shape
 

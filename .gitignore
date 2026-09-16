@@ -19,9 +19,12 @@ modules/**/storage/*.log
 modules/**/storage/logs/*
 connectors/**/storage/*.sqlite
 connectors/**/storage/*.sqlite3
+connectors/**/storage/*.sqlite-*
 connectors/**/storage/*.db
 connectors/**/storage/*.json
 connectors/**/storage/*.log
+connectors/**/storage/*.key
+connectors/**/storage/*.lock
 connectors/**/storage/logs/*
 
 # OS junk

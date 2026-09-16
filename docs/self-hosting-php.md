@@ -4,6 +4,8 @@
 
 The Telegram connector is now a normal PHP app.
 
+The Google Calendar connector is a separate normal PHP app in `connectors/google-calendar/php/`. It uses the same deployment shape: expose only `public/`, keep `storage/` private, and run its cron endpoint at the configured interval. See [Google Calendar Connector](google-calendar-connector.md).
+
 ## Requirements
 
 - PHP `8.1+`
