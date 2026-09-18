@@ -19,7 +19,7 @@ final class ChatHandler
         $status = trim((string) ($response['status'] ?? ''));
         $mode = trim((string) ($response['mode'] ?? ''));
         $jobId = trim((string) ($response['job_id'] ?? ''));
-        $reply = $this->extractPrimaryReply($response);
+        $reply = $this->normalizeMessageSentConfirmation($this->extractPrimaryReply($response));
         $systemMessages = $this->extractSystemMessages($response);
 
         if ($reply !== '' && !($mode === 'queued' && $status === 'queued' && $jobId !== '')) {
@@ -27,8 +27,18 @@ final class ChatHandler
         }
 
         foreach ($systemMessages as $systemMessage) {
-            $this->sendChunks($chatId, "System\n\n" . $systemMessage);
+            $this->sendChunks($chatId, "System\n\n" . $this->normalizeMessageSentConfirmation($systemMessage));
         }
+    }
+
+    private function normalizeMessageSentConfirmation(string $text): string
+    {
+        $text = trim($text);
+        if (preg_match('/\Amessage\s+sent(?:\s+(?:to|for)\s+.+?)?[.!]?\z/i', $text) === 1) {
+            return 'Message sent.';
+        }
+
+        return $text;
     }
 
     private function extractPrimaryReply(array $response): string
