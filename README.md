@@ -56,6 +56,7 @@ The current public implementations are:
 connectors/telegram/php/
 connectors/google-calendar/php/
 tools/rag-prep/php/
+tools/ghost-eval/php/
 ```
 
 The Telegram connector is built for:
@@ -99,6 +100,8 @@ The RAG prep tool is built for:
 - cron or URL cron
 
 It turns uploaded TXT, PDF, and DOCX source files into one telmi OS-ready `.txt` memory artifact by extracting the text locally and letting a Ghost perform the final semantic chunking. Text-based PDFs are handled by a bundled pure-PHP parser; encrypted and scanned/image-only PDFs are rejected with an explicit message.
+
+The standalone Ghost Eval tool challenges a configured Ghost through realtime Ghost API v2 chat, asks the same Ghost to judge the answer with RAG and history disabled, pulls evaluation sets from a selected group Files space, and uploads human-readable Markdown reports back to that space. It has its own installer, protected dashboard, SQLite run queue, cron worker, status, health, and maintenance pages. It does not depend on the RAG Prep tool.
 
 The RAG dashboard uses a private bearer URL (`index.php?key=...`), not a traditional password login. It is Hades-compatible: 7 MiB per file and per job, one job per cron call, a 20-second Ghost request timeout, and persisted three-attempt retry handling. GD and external process/PDF binaries are not required.
 
@@ -155,6 +158,7 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - [Ghost API v2](docs/ghost-api-v2.md)
 - [Self-Hosting PHP](docs/self-hosting-php.md)
 - [RAG Prep Tool](docs/rag-prep-tool.md)
+- [Ghost Eval Tool](docs/ghost-eval-tool.md)
 - [Self-Hosting RAG Prep PHP](docs/self-hosting-rag-prep-php.md)
 - [Google Calendar Connector](docs/google-calendar-connector.md)
 - [Security](docs/security.md)
@@ -180,4 +184,4 @@ Plain-language boundary:
 
 ## Status
 
-`v0.1.0` currently ships the Telegram PHP connector module in `connectors/telegram/php/`, the Google Calendar PHP connector in `connectors/google-calendar/php/`, the RAG prep PHP tool in `tools/rag-prep/php/`, and the self-hosted install flow around all three.
+This branch contains the Telegram PHP connector module in `connectors/telegram/php/`, the Google Calendar PHP connector in `connectors/google-calendar/php/`, the RAG prep PHP tool in `tools/rag-prep/php/`, and the standalone Ghost Eval PHP tool in `tools/ghost-eval/php/`.

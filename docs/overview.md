@@ -35,6 +35,7 @@ The current shipped modules are:
 - one Telegram bot connector for PHP in `connectors/telegram/php/`
 - one Google Calendar connector for PHP in `connectors/google-calendar/php/`
 - one RAG prep utility tool for PHP in `tools/rag-prep/php/`
+- one standalone Ghost Eval utility tool for PHP in `tools/ghost-eval/php/`
 
 The repository is shaped as a connector framework, and this is what is public today:
 
@@ -50,6 +51,7 @@ The repository is shaped as a connector framework, and this is what is public to
 - pairing recovery through `pairing.php`
 - protected maintenance actions through `maintenance.php`
 - TXT, PDF, and DOCX intake for Ghost-driven telmi OS artifact generation
+- group Files-based Ghost evaluation suites and Markdown reports
 
 Core flows:
 
@@ -78,6 +80,14 @@ The RAG prep tool uses a different flow:
 3. the tool sends one full normalized source document to Ghost API v2
 4. Ghost returns one plain-text telmi OS-ready artifact
 5. the user downloads the final `.txt` file
+
+The Ghost Eval tool is another standalone utility flow:
+
+1. the user selects a `.json` evaluation set from a writable group Files space
+2. the tool snapshots the file and queues a run
+3. cron sends each case to the configured Ghost in realtime with the selected RAG and history options
+4. the same Ghost judges each answer in realtime with RAG and history disabled
+5. the tool uploads a dated Markdown report to the same group Files space
 
 ## Why Teleport AI Publishes This
 
