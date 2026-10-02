@@ -106,6 +106,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     'use_rag' => true, 'use_history' => false, 'max_cases' => 40,
                     'judge_rubric' => 'Judge factual support against the supplied memory extract. Mark unsupported claims as fail, a correct refusal as pass for out-of-scope cases, and insufficient evidence as unclear.',
                 ],
+                'schedule' => [
+                    'enabled' => false, 'suite_file_id' => '', 'suite_file_name' => '',
+                    'interval' => 'daily', 'interval_seconds' => 86400, 'next_run_at' => 0,
+                    'last_attempt_at' => 0, 'last_status' => 'Disabled', 'last_error' => '',
+                ],
                 'notifications' => ['enabled' => false, 'on_start' => false, 'on_finish' => true, 'on_errors' => true, 'on_p0_failures' => true],
             ];
             $config->write($configData);

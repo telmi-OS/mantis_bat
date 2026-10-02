@@ -34,6 +34,8 @@ This module follows the Mantis Bat discovery layout `tools/ghost-eval/php/README
 4. Choose a writable group Files space and save the generated private dashboard, cron, status, health, maintenance, and installer unlock URLs.
 5. Configure the Hades cron scheduler with the generated cron URL (`<instance-url>/cron.php?key=...`) once per minute.
 
+In the dashboard, **Automatic evaluation** can rerun a selected Files suite daily or weekly. The first run is due one interval after saving. The same one-minute Hades cron checks that schedule, fetches the latest suite when due, and advances runs. If a run is already active at a scheduled time, that occurrence is skipped.
+
 The app stores its SQLite database, configuration, lock, logs, and cached reports under the instance's private `storage/` directory. The Ghost JWT is not sent to browser JavaScript. The JSON suite and final Markdown report are stored in the selected group Files space.
 
 ## Install On A Separate PHP Host
@@ -51,7 +53,8 @@ Each case requires `question` and `memory_extract`. It can specify `grading_rubr
 - only one run can be queued or active at a time
 - at most 40 cases per run
 - one cron tick makes at most one Ghost or Files API request
-- realtime Ghost calls use a 5-second connection timeout and 20-second total timeout
+- realtime chat calls use a 15-second connection timeout and 30-second total timeout
+- Files and settings calls use a 5-second connection timeout and 20-second total timeout
 - chat requests are not automatically replayed after transport errors
 - HTTP cron requests are rate-limited to one per 50 seconds per source IP
 

@@ -101,7 +101,7 @@ The RAG prep tool is built for:
 
 It turns uploaded TXT, PDF, and DOCX source files into one telmi OS-ready `.txt` memory artifact by extracting the text locally and letting a Ghost perform the final semantic chunking. Text-based PDFs are handled by a bundled pure-PHP parser; encrypted and scanned/image-only PDFs are rejected with an explicit message.
 
-The standalone Ghost Eval tool challenges a configured Ghost through realtime Ghost API v2 chat, asks the same Ghost to judge the answer with RAG and history disabled, pulls evaluation sets from a selected group Files space, and uploads human-readable Markdown reports back to that space. It has its own installer, protected dashboard, SQLite run queue, cron worker, status, health, and maintenance pages. It does not depend on the RAG Prep tool.
+The standalone Ghost Eval tool challenges a configured Ghost through realtime Ghost API v2 chat, asks the same Ghost to judge the answer with RAG and history disabled, pulls evaluation sets from a selected group Files space, and uploads human-readable Markdown reports back to that space. It has its own installer, protected dashboard, SQLite run queue, one-minute cron worker, optional daily or weekly suite scheduling, status, health, and maintenance pages. It does not depend on the RAG Prep tool.
 
 The RAG dashboard uses a private bearer URL (`index.php?key=...`), not a traditional password login. It is Hades-compatible: 7 MiB per file and per job, one job per cron call, a 20-second Ghost request timeout, and persisted three-attempt retry handling. GD and external process/PDF binaries are not required.
 

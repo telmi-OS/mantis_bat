@@ -26,7 +26,7 @@ final class GhostClient
             'meta' => array_merge(['source' => 'mantis_bat_ghost_eval', 'request_id' => $requestId], $meta),
             'options' => ['mode' => 'realtime', 'use_rag' => $useRag, 'use_history' => $useHistory],
         ];
-        $body = $this->requestJson('POST', '/chat', $payload);
+        $body = $this->requestJson('POST', '/chat', $payload, 30, 15);
         $reply = $body['reply'] ?? $body['data']['reply'] ?? null;
         if (!is_string($reply) || trim($reply) === '') {
             throw new RuntimeException('Ghost API returned no realtime reply.');
@@ -87,13 +87,13 @@ final class GhostClient
         return $this->requestJson('GET', '/settings');
     }
 
-    private function requestJson(string $method, string $path, ?array $payload = null): array
+    private function requestJson(string $method, string $path, ?array $payload = null, int $timeout = 20, int $connectTimeout = 5): array
     {
         $url = $this->url($path);
         $fields = null;
         $headers = ['Content-Type: application/json'];
         if ($payload !== null) $fields = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        [$status, $body] = $this->send($method, $url, $fields, 20, $headers);
+        [$status, $body] = $this->send($method, $url, $fields, $timeout, $headers, $connectTimeout);
         $decoded = json_decode($body, true);
         if (!is_array($decoded) || $status < 200 || $status >= 300 || (($decoded['ok'] ?? true) === false)) {
             throw new RuntimeException($this->apiError($body, $status));
@@ -101,7 +101,7 @@ final class GhostClient
         return $decoded;
     }
 
-    private function send(string $method, string $url, mixed $payload, int $timeout, array $extraHeaders = []): array
+    private function send(string $method, string $url, mixed $payload, int $timeout, array $extraHeaders = [], int $connectTimeout = 5): array
     {
         $headers = array_merge([
             'Authorization: Bearer ' . $this->token,
@@ -112,7 +112,7 @@ final class GhostClient
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_CONNECTTIMEOUT => $connectTimeout,
             CURLOPT_TIMEOUT => $timeout,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,

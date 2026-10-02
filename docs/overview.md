@@ -83,9 +83,9 @@ The RAG prep tool uses a different flow:
 
 The Ghost Eval tool is another standalone utility flow:
 
-1. the user selects a `.json` evaluation set from a writable group Files space
-2. the tool snapshots the file and queues a run
-3. cron sends each case to the configured Ghost in realtime with the selected RAG and history options
+1. the user queues a `.json` evaluation set from a writable group Files space, or enables daily/weekly automatic runs for a selected suite
+2. the tool fetches the current file, snapshots it, and queues a run
+3. one-minute cron ticks send each case to the configured Ghost in realtime with the selected RAG and history options
 4. the same Ghost judges each answer in realtime with RAG and history disabled
 5. the tool uploads a dated Markdown report to the same group Files space
 

@@ -86,11 +86,19 @@ The evaluator sends the selected group ID with each call. The judge always recei
 - One run may be queued or active at a time.
 - A run is capped at 40 cases.
 - One worker tick makes at most one Ghost or Files API request.
-- Ghost API calls use a 5-second connection timeout and a 20-second total timeout.
+- Realtime chat calls use a 15-second connection timeout and a 30-second total timeout. Files and settings calls use 5 seconds to connect and 20 seconds total.
 - HTTP cron requests are limited to one per 50 seconds per source IP; a one-minute schedule is suitable.
 - Chat calls are not automatically replayed after transport errors, because a timed-out request may already have reached the Ghost.
 
-The dashboard only queues a run. Configure cron to call `public/cron.php?key=...` once per minute, or run it from CLI:
+## Run Manually Or On A Schedule
+
+Clicking **Queue evaluation** fetches and snapshots the chosen suite, then adds one run to the local queue. The cron worker advances that run one step per tick.
+
+For automatic reruns, enable **Automatic evaluation** in the dashboard, choose a JSON suite, and select daily or weekly. The first automatic run becomes due one interval after you save. At each due time, cron fetches the latest suite contents from Files and queues a run if nothing else is active. A due occurrence is skipped when another run is still active. You can still queue an extra run manually.
+
+Set the Hades cron schedule to **1m**. That single cron job both checks the automatic schedule and advances queued work; it does not start a Ghost evaluation every minute. When idle, it only checks local state and returns.
+
+For a separate PHP host, configure cron to call `public/cron.php?key=...` once per minute, or run it from CLI:
 
 ```text
 * * * * * php /path/to/tools/ghost-eval/php/public/cron.php

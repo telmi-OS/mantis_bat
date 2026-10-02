@@ -49,13 +49,63 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             header('Location: index.php', true, 303);
             exit;
         }
-        if ($action === 'start_run') {
-            $remoteIp = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
-            if ($storage->hitRateLimit('start_run', $remoteIp, 1, 60)) {
-                throw new RuntimeException('Wait one minute before starting another run.');
+        if ($action === 'save_schedule') {
+            $all = $config->all();
+            $schedule = is_array($all['schedule'] ?? null) ? $all['schedule'] : [];
+            $enabled = isset($_POST['auto_enabled']);
+            if ($enabled) {
+                $fileId = isset($_POST['schedule_suite_file_id']) && is_string($_POST['schedule_suite_file_id'])
+                    ? trim($_POST['schedule_suite_file_id'])
+                    : '';
+                $interval = isset($_POST['schedule_interval']) && is_string($_POST['schedule_interval'])
+                    ? $_POST['schedule_interval']
+                    : 'daily';
+                $intervals = ['daily' => 86400, 'weekly' => 604800];
+                if (!isset($intervals[$interval])) throw new RuntimeException('Choose a daily or weekly schedule.');
+                if ($fileId === '') throw new RuntimeException('Choose a JSON evaluation set for the automatic schedule.');
+                $availableFiles = $services['ghost']->listFiles((string) $config->get('files.space_id', ''), (string) $config->get('files.folder_id', ''));
+                $selected = null;
+                foreach ($availableFiles as $file) {
+                    $id = (string) ($file['file_id'] ?? $file['id'] ?? '');
+                    $name = (string) ($file['name'] ?? $file['filename'] ?? '');
+                    if ($id === $fileId && strtolower(pathinfo($name, PATHINFO_EXTENSION)) === 'json') $selected = $file;
+                }
+                if (!is_array($selected)) throw new RuntimeException('Choose an available .json file from the configured group Files space.');
+                $schedule = array_merge($schedule, [
+                    'enabled' => true,
+                    'suite_file_id' => $fileId,
+                    'suite_file_name' => (string) ($selected['name'] ?? $selected['filename'] ?? 'evaluation-set.json'),
+                    'interval' => $interval,
+                    'interval_seconds' => $intervals[$interval],
+                    'next_run_at' => time() + $intervals[$interval],
+                    'last_attempt_at' => (int) ($schedule['last_attempt_at'] ?? 0),
+                    'last_status' => 'Enabled; first run is scheduled after the selected interval.',
+                    'last_error' => '',
+                ]);
+            } else {
+                $schedule['enabled'] = false;
+                $schedule['next_run_at'] = 0;
+                $schedule['last_status'] = 'Disabled';
+                $schedule['last_error'] = '';
             }
+            $all['schedule'] = $schedule;
+            $config->write($all);
+            $_SESSION['ghost_eval_notice'] = $enabled
+                ? 'Automatic evaluation enabled. The first run is due after the selected interval; Hades cron checks it every minute.'
+                : 'Automatic evaluation disabled.';
+            header('Location: index.php', true, 303);
+            exit;
+        }
+        if ($action === 'start_run') {
             $fileId = isset($_POST['suite_file_id']) && is_string($_POST['suite_file_id']) ? trim($_POST['suite_file_id']) : '';
             if ($fileId === '') throw new RuntimeException('Choose an evaluation set from the selected group Files space.');
+            if ($storage->activeRunExists()) {
+                throw new RuntimeException('A run is already queued or running. Check Recent runs; the cron worker will continue it.');
+            }
+            $sessionSubject = hash('sha256', session_id());
+            if ($storage->hitRateLimit('start_run_session', $sessionSubject, 1, 60)) {
+                throw new RuntimeException('A queue attempt was made in this session within the last minute. Check Recent runs before retrying.');
+            }
             $files = $services['ghost']->listFiles((string) $config->get('files.space_id', ''), (string) $config->get('files.folder_id', ''));
             $selected = null;
             foreach ($files as $file) {
@@ -87,6 +137,8 @@ try {
 $runs = $storage->listRuns(20);
 $csrf = ghostEvalCsrf($services);
 $notifications = $config->get('notifications', []);
+$schedule = $config->get('schedule', []);
+$schedule = is_array($schedule) ? $schedule : [];
 ?>
 <!doctype html>
 <html lang="en">
@@ -112,14 +164,14 @@ $notifications = $config->get('notifications', []);
     <div class="dashboard-grid">
         <section class="card">
             <h2><span class="gradient-text">Start a run</span></h2>
-            <p class="copy">The tool fetches the selected JSON file from Files when you start. It records a SHA-256 snapshot so edits to the Files copy do not change an active run.</p>
+            <p class="copy">The tool fetches the selected JSON file from Files when you queue a run. It records a SHA-256 snapshot so edits to the Files copy do not change an active run.</p>
             <?php if ($filesError !== ''): ?><p class="status-bad"><?= ghostEvalH($filesError) ?></p><?php elseif ($files === []): ?><p class="field-help">No JSON suite files found in the selected Files folder.</p><?php else: ?>
                 <form method="post"><input type="hidden" name="csrf_token" value="<?= ghostEvalH($csrf) ?>"><input type="hidden" name="action" value="start_run">
                     <label>Evaluation set from group Files<select name="suite_file_id" required><option value="">Choose a JSON suite</option><?php foreach ($files as $file): ?><option value="<?= ghostEvalH((string) ($file['file_id'] ?? $file['id'] ?? '')) ?>"><?= ghostEvalH((string) ($file['name'] ?? $file['filename'] ?? 'Unnamed JSON')) ?></option><?php endforeach; ?></select></label>
                     <button type="submit">Queue evaluation</button>
                 </form>
             <?php endif; ?>
-            <p class="field-help">Only one run can be active. Each cron tick makes at most one Ghost API request.</p>
+            <p class="field-help"><strong>Queue evaluation</strong> creates one run now. Configure the Hades cron worker to process queued runs. It advances one Ghost or Files API request per tick.</p>
         </section>
 
         <section class="card">
@@ -147,6 +199,21 @@ $notifications = $config->get('notifications', []);
                 <label class="check-row"><input type="checkbox" name="notify_p0" value="1" <?= ($notifications['on_p0_failures'] ?? true) ? 'checked' : '' ?>> Tell the group when a P0 case fails</label>
                 <p class="agentic-note"><strong>Before enabling messages:</strong> turn on the Ghost’s <strong>Agentic</strong> capability in its telmi OS Ghost settings. Notifications use normal “Tell <?= ghostEvalH((string) $config->get('ghost.group_name', 'GROUPNAME')) ?> …” chat. Autonomous Mode and Action tools are not required.</p>
                 <button type="submit" class="button-secondary">Save notification settings</button>
+            </form>
+        </section>
+
+        <section class="card">
+            <h2><span class="gradient-text">Automatic evaluation</span></h2>
+            <p class="copy">Hades cron checks this schedule once per minute. When a run is due and no other run is active, the latest copy of the selected suite is fetched from Files and queued.</p>
+            <form method="post"><input type="hidden" name="csrf_token" value="<?= ghostEvalH($csrf) ?>"><input type="hidden" name="action" value="save_schedule">
+                <label class="check-row"><input type="checkbox" name="auto_enabled" value="1" <?= ($schedule['enabled'] ?? false) ? 'checked' : '' ?>> Enable recurring evaluation</label>
+                <?php if ($filesError !== ''): ?><p class="status-bad"><?= ghostEvalH($filesError) ?></p><?php endif; ?>
+                <label>Suite to rerun from group Files<select name="schedule_suite_file_id" <?= $files === [] ? 'disabled' : '' ?>><option value="">Choose a JSON suite</option><?php if (($schedule['suite_file_id'] ?? '') !== '' && !array_filter($files, static fn(array $file): bool => (string) ($file['file_id'] ?? $file['id'] ?? '') === (string) $schedule['suite_file_id'])): ?><option value="<?= ghostEvalH((string) $schedule['suite_file_id']) ?>" selected><?= ghostEvalH((string) ($schedule['suite_file_name'] ?? 'Previously selected suite')) ?> (not currently listed)</option><?php endif; ?><?php foreach ($files as $file): $scheduleFileId = (string) ($file['file_id'] ?? $file['id'] ?? ''); ?><option value="<?= ghostEvalH($scheduleFileId) ?>" <?= $scheduleFileId === (string) ($schedule['suite_file_id'] ?? '') ? 'selected' : '' ?>><?= ghostEvalH((string) ($file['name'] ?? $file['filename'] ?? 'Unnamed JSON')) ?></option><?php endforeach; ?></select></label>
+                <label>Repeat<select name="schedule_interval"><option value="daily" <?= ($schedule['interval'] ?? 'daily') === 'daily' ? 'selected' : '' ?>>Daily</option><option value="weekly" <?= ($schedule['interval'] ?? '') === 'weekly' ? 'selected' : '' ?>>Weekly</option></select><span class="field-help">The first automatic run is due one interval after you save.</span></label>
+                <?php if (($schedule['enabled'] ?? false) && (int) ($schedule['next_run_at'] ?? 0) > 0): ?><p class="field-help">Next scheduled run: <strong><?= ghostEvalH(date(DATE_ATOM, (int) $schedule['next_run_at'])) ?></strong></p><?php endif; ?>
+                <?php if (($schedule['last_status'] ?? '') !== ''): ?><p class="field-help">Schedule status: <?= ghostEvalH((string) $schedule['last_status']) ?></p><?php endif; ?>
+                <?php if (($schedule['last_error'] ?? '') !== ''): ?><p class="status-bad"><?= ghostEvalH((string) $schedule['last_error']) ?></p><?php endif; ?>
+                <button type="submit" class="button-secondary">Save automatic schedule</button>
             </form>
         </section>
 

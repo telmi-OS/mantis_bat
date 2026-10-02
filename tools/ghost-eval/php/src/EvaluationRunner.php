@@ -108,7 +108,11 @@ final class EvaluationRunner
     public function processNext(): array
     {
         $run = $this->storage->nextRun();
-        if ($run === null) return ['ok' => true, 'processed' => false, 'reason' => 'no_pending_run'];
+        if ($run === null) {
+            $scheduled = $this->queueScheduledRunIfDue();
+            return $scheduled ?? ['ok' => true, 'processed' => false, 'reason' => 'no_pending_run'];
+        }
+        $this->skipScheduledOccurrenceIfDue();
         $run['status'] = 'running';
         $run['updated_at'] = date(DATE_ATOM);
         $this->storage->saveRun($run);
@@ -214,6 +218,81 @@ final class EvaluationRunner
         $run['updated_at'] = date(DATE_ATOM);
         $this->storage->saveRun($run);
         return ['ok' => true, 'processed' => true, 'run_id' => $run['id'], 'phase' => $run['phase'], 'status' => $run['status']];
+    }
+
+    private function queueScheduledRunIfDue(): ?array
+    {
+        $schedule = $this->config->get('schedule', []);
+        if (!is_array($schedule) || !($schedule['enabled'] ?? false)) return null;
+        $now = time();
+        if ((int) ($schedule['next_run_at'] ?? 0) > $now) return null;
+
+        $interval = in_array((int) ($schedule['interval_seconds'] ?? 0), [86400, 604800], true)
+            ? (int) $schedule['interval_seconds']
+            : 86400;
+        $all = $this->config->all();
+        $all['schedule']['next_run_at'] = $now + $interval;
+        $all['schedule']['last_attempt_at'] = $now;
+        $all['schedule']['last_status'] = 'Fetching the latest suite from Files';
+        $all['schedule']['last_error'] = '';
+        $this->config->write($all);
+
+        if ($this->storage->activeRunExists()) {
+            $this->markScheduleStatus('Skipped because another run was active at the scheduled time.');
+            return ['ok' => true, 'processed' => false, 'reason' => 'scheduled_run_skipped_active'];
+        }
+
+        $fileId = (string) ($schedule['suite_file_id'] ?? '');
+        $fileName = (string) ($schedule['suite_file_name'] ?? 'evaluation-set.json');
+        if ($fileId === '') {
+            $this->markScheduleFailure('Choose a Files evaluation set in the schedule settings.');
+            return ['ok' => false, 'processed' => true, 'reason' => 'scheduled_suite_missing'];
+        }
+
+        try {
+            $client = new GhostClient(
+                (string) $this->config->get('ghost.api_base', ''),
+                (string) $this->config->get('ghost.api_token', '')
+            );
+            $suiteBytes = $client->fileContent($fileId);
+            $runId = $this->makeSuiteFromFile($fileId, $fileName, $suiteBytes);
+            $this->markScheduleStatus('Run queued: ' . $runId);
+            return ['ok' => true, 'processed' => true, 'run_id' => $runId, 'phase' => 'queued', 'status' => 'queued', 'reason' => 'scheduled_run_queued'];
+        } catch (\Throwable $exception) {
+            $this->markScheduleFailure($exception->getMessage());
+            return ['ok' => false, 'processed' => true, 'reason' => 'scheduled_run_failed'];
+        }
+    }
+
+    private function skipScheduledOccurrenceIfDue(): void
+    {
+        $schedule = $this->config->get('schedule', []);
+        if (!is_array($schedule) || !($schedule['enabled'] ?? false) || (int) ($schedule['next_run_at'] ?? 0) > time()) return;
+        $interval = in_array((int) ($schedule['interval_seconds'] ?? 0), [86400, 604800], true)
+            ? (int) $schedule['interval_seconds']
+            : 86400;
+        $all = $this->config->all();
+        $all['schedule']['next_run_at'] = time() + $interval;
+        $all['schedule']['last_attempt_at'] = time();
+        $all['schedule']['last_status'] = 'Skipped because another run was active at the scheduled time.';
+        $all['schedule']['last_error'] = '';
+        $this->config->write($all);
+    }
+
+    private function markScheduleStatus(string $status): void
+    {
+        $all = $this->config->all();
+        $all['schedule']['last_status'] = $status;
+        $all['schedule']['last_error'] = '';
+        $this->config->write($all);
+    }
+
+    private function markScheduleFailure(string $message): void
+    {
+        $all = $this->config->all();
+        $all['schedule']['last_status'] = 'Scheduled run failed';
+        $all['schedule']['last_error'] = substr($message, 0, 500);
+        $this->config->write($all);
     }
 
     public function makeSuiteFromFile(string $fileId, string $fileName, string $bytes): string
