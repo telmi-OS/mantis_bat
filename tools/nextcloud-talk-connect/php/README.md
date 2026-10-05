@@ -19,8 +19,9 @@ Nextcloud Talk Connect creates public Nextcloud Talk meeting rooms and returns t
 - validates Nextcloud credentials during setup
 - generates a random X-Auth key for Ghost requests
 - creates public Talk rooms through the OCS Talk API using Basic Auth
-- returns the exact room token and a URL built as &lt;Nextcloud base URL&gt;/call/&lt;token&gt;
+- returns the exact room token and a URL built as &lt;Nextcloud base URL&gt;/call/&lt;token&gt;#direct-call
 - reuses the result for case-insensitive matching names for five minutes
+- shows meetings created in the last seven days, with clickable links, on the protected dashboard
 - exposes private status, health, and maintenance pages
 
 The Ghost never receives the Nextcloud username or app password. Those credentials remain in the private server-side config and are sent only to Nextcloud over verified HTTPS.
@@ -74,11 +75,13 @@ GET /api/meet/create.php returns the following response. Supply the meeting name
 <pre>{
   "success": true,
   "meeting_name": "Architecture Discussion",
-  "meeting_url": "https://meet.example.com/call/abcDEF123",
+  "meeting_url": "https://meet.example.com/call/abcDEF123#direct-call",
   "token": "abcDEF123"
 }</pre>
 
-The name parameter is optional. The service trims it, removes control characters, collapses whitespace, shortens it to 100 Unicode characters, and uses the configured default when the result is empty. Deduplication uses a Unicode case-insensitive key of that normalized name. The first normalized spelling is retained for the displayed room name. Requests for an existing name return the same token and URL for five minutes, measured from the first create attempt. A per-name file lock makes concurrent requests wait for and share the result.
+The X-Meeting-Name header is optional. The service trims it, removes control characters, collapses whitespace, shortens it to 100 Unicode characters, and uses the configured default when the result is empty. Deduplication uses a Unicode case-insensitive key of that normalized name. The first normalized spelling is retained for the displayed room name. Requests for an existing name return the same token and URL for five minutes, measured from the first create attempt. A per-name file lock makes concurrent requests wait for and share the result.
+
+The protected dashboard lists successful room creations from the last seven days, newest first, with a clickable direct-call link and UTC timestamp. Repeat requests served from the deduplication cache do not add duplicate history rows. Entries older than seven days are removed as the dashboard or API is used. Clearing local meeting records in maintenance also clears this history; rooms remain in Nextcloud Talk.
 
 To ensure one upstream creation attempt per name and five-minute window, failed attempts are cached as failures for that window. If PHP stops while an attempt is pending, later requests receive meeting_creation_in_progress until the reservation expires rather than risking a duplicate room.
 
@@ -107,7 +110,7 @@ The returned OCS response must have ocs.meta.status equal to ok and a non-empty 
 ## Operational Pages
 
 - public/install.php: setup and private installer unlock flow
-- public/index.php?key=...: protected dashboard and ready-to-copy Ghost preset
+- public/index.php?key=...: protected dashboard, recent meeting links, and ready-to-copy Ghost preset
 - public/api/meet/create.php and public/api/meet/create/index.php: GET endpoint and clean-route fallback
 - public/status.php?key=...: masked runtime config and active dedupe count
 - public/health.php?key=...: private JSON health information

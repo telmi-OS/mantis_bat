@@ -37,6 +37,13 @@ final class Storage
         )");
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_meetings_expiry ON meetings(expires_at)');
         $this->pdo->exec('CREATE TABLE IF NOT EXISTS create_limits (created_at INTEGER NOT NULL)');
+        $this->pdo->exec('CREATE TABLE IF NOT EXISTS meeting_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            meeting_name TEXT NOT NULL,
+            meeting_url TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )');
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_meeting_history_created ON meeting_history(created_at DESC)');
     }
 
     public function recentMeeting(string $nameKey, int $now): ?array
@@ -53,10 +60,42 @@ final class Storage
         $stmt->execute([':now' => $now]);
     }
 
-    public function saveMeeting(string $nameKey, string $token, string $url, int $createdAt): void
+    public function purgeMeetingHistory(int $cutoff): void
     {
-        $stmt = $this->pdo->prepare("UPDATE meetings SET token=:token,meeting_url=:url,status='success',error_code='' WHERE name_key=:key AND created_at=:created");
-        $stmt->execute([':key' => $nameKey, ':token' => $token, ':url' => $url, ':created' => $createdAt]);
+        $stmt = $this->pdo->prepare('DELETE FROM meeting_history WHERE created_at < :cutoff');
+        $stmt->execute([':cutoff' => $cutoff]);
+    }
+
+    public function saveMeeting(string $nameKey, string $name, string $token, string $url, int $reservationAt, int $meetingCreatedAt): void
+    {
+        $this->pdo->exec('BEGIN IMMEDIATE');
+        try {
+            $stmt = $this->pdo->prepare("UPDATE meetings SET token=:token,meeting_url=:url,status='success',error_code='' WHERE name_key=:key AND created_at=:created");
+            $stmt->execute([':key' => $nameKey, ':token' => $token, ':url' => $url, ':created' => $reservationAt]);
+            if ($stmt->rowCount() !== 1) throw new RuntimeException('The meeting reservation could not be completed.');
+            $history = $this->pdo->prepare('INSERT INTO meeting_history(meeting_name,meeting_url,created_at) VALUES(:name,:url,:created)');
+            $history->execute([':name' => $name, ':url' => $url, ':created' => $meetingCreatedAt]);
+            $this->pdo->exec('COMMIT');
+        } catch (\Throwable $exception) {
+            $this->pdo->exec('ROLLBACK');
+            throw $exception;
+        }
+    }
+
+    public function recentMeetingHistory(int $cutoff, int $limit = 500): array
+    {
+        $stmt = $this->pdo->prepare('SELECT meeting_name, meeting_url, created_at FROM meeting_history WHERE created_at >= :cutoff ORDER BY created_at DESC, id DESC LIMIT :limit');
+        $stmt->bindValue(':cutoff', $cutoff, PDO::PARAM_INT);
+        $stmt->bindValue(':limit', min(500, max(1, $limit)), PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+
+    public function meetingHistoryCount(int $cutoff): int
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM meeting_history WHERE created_at >= :cutoff');
+        $stmt->execute([':cutoff' => $cutoff]);
+        return (int) $stmt->fetchColumn();
     }
 
     public function reserveMeeting(string $nameKey, string $name, int $createdAt, int $expiresAt): void
@@ -104,5 +143,6 @@ final class Storage
     {
         $this->pdo->exec('DELETE FROM meetings');
         $this->pdo->exec('DELETE FROM create_limits');
+        $this->pdo->exec('DELETE FROM meeting_history');
     }
 }

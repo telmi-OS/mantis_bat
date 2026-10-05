@@ -14,6 +14,8 @@ See [the PHP tool README](../tools/nextcloud-talk-connect/php/README.md) for ins
 
 Open the private dashboard URL to copy the fixed endpoint URL, GET method, X-Auth and X-Meeting-Name header JSON, and description into a Ghost preset.
 
+The protected dashboard also shows successful meeting creations from the last seven days, newest first, with clickable direct-call links and UTC timestamps. Deduplicated requests reuse the original result and do not add another entry. The maintenance page's local-record clearing action removes this history too.
+
 The endpoint is:
 
     GET /api/meet/create.php

@@ -64,6 +64,8 @@ $reservationAt = 0;
 try {
     $now = time();
     $services['storage']->purgeExpiredMeetings($now);
+    $historyCutoff = $now - (7 * 24 * 60 * 60);
+    $services['storage']->purgeMeetingHistory($historyCutoff);
     $cached = $services['storage']->recentMeeting($nameKey, $now);
     if (is_array($cached)) {
         if (($cached['status'] ?? '') === 'pending') meetJson(503, ['success' => false, 'error' => 'meeting_creation_in_progress']);
@@ -88,8 +90,8 @@ try {
     $created = $talk->createPublicRoom($name);
     $upstreamStatus = (int) $created['http_status'];
     $token = (string) $created['token'];
-    $meetingUrl = rtrim((string) $config->get('nextcloud.base_url'), '/') . '/call/' . rawurlencode($token);
-    $services['storage']->saveMeeting($nameKey, $token, $meetingUrl, $reservationAt);
+    $meetingUrl = rtrim((string) $config->get('nextcloud.base_url'), '/') . '/call/' . rawurlencode($token) . '#direct-call';
+    $services['storage']->saveMeeting($nameKey, $name, $token, $meetingUrl, $reservationAt, time());
     meetLog($services, 'success', $nameKey, $upstreamStatus);
     meetJson(200, ['success' => true, 'meeting_name' => $name, 'meeting_url' => $meetingUrl, 'token' => $token]);
 } catch (Throwable $exception) {

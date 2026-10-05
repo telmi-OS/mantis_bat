@@ -15,6 +15,10 @@ if (isset($_GET['key'])) {
     exit;
 }
 
+$historyCutoff = time() - (7 * 24 * 60 * 60);
+$services['storage']->purgeMeetingHistory($historyCutoff);
+$meetingHistoryCount = $services['storage']->meetingHistoryCount($historyCutoff);
+$meetingHistory = $services['storage']->recentMeetingHistory($historyCutoff, 500);
 $apiUrl = rtrim((string) $config->get('app.base_url'), '/') . '/api/meet/create.php';
 $apiKey = (string) $config->get('api.auth_key', '');
 $headers = json_encode(['X-Auth' => $apiKey, 'X-Meeting-Name' => '{{meeting_name}}'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}';
@@ -35,6 +39,20 @@ $description = 'Create a new Nextcloud Talk meeting link. Use this when the user
         .preset-block pre { overflow-x: auto; padding: 18px; padding-top: 48px; border: 1px solid var(--telmi-border); border-radius: 14px; background: rgba(0,0,0,.34); white-space: pre-wrap; overflow-wrap: anywhere; }
         .preset-block button { position: absolute; top: 8px; right: 8px; padding: 7px 12px; font-size: .82rem; }
         .preset-url { overflow-wrap: anywhere; }
+        .history-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+        .history-count { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid rgba(40, 215, 255, .28); border-radius: 999px; color: #c9f7ff; background: rgba(6, 182, 212, .1); white-space: nowrap; }
+        .history-count::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #28d7ff; box-shadow: 0 0 12px rgba(40, 215, 255, .8); }
+        .meeting-list { display: grid; gap: 12px; margin-top: 18px; }
+        .meeting-item { padding: 18px; border: 1px solid var(--telmi-border); border-radius: 18px; background: linear-gradient(130deg, rgba(139, 92, 246, .1), rgba(6, 182, 212, .06)); }
+        .meeting-item-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+        .meeting-item h3 { margin: 0 0 5px; font-size: 1.08rem; }
+        .meeting-item time { color: var(--telmi-muted); font-size: .9rem; }
+        .meeting-link { display: flex; align-items: center; gap: 10px; color: #bcefff; overflow-wrap: anywhere; text-decoration: none; }
+        .meeting-link:hover { color: white; text-decoration: underline; }
+        .meeting-link-mark { display: inline-grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; border-radius: 50%; background: rgba(40, 215, 255, .16); }
+        .meeting-url { display: block; margin-top: 8px; color: var(--telmi-muted); font-family: "Share Tech Mono", monospace; font-size: .82rem; overflow-wrap: anywhere; }
+        .empty-history { padding: 26px 18px; border: 1px dashed rgba(255,255,255,.22); border-radius: 18px; text-align: center; color: var(--telmi-muted); }
+        @media (max-width: 600px) { .history-heading, .meeting-item-head { align-items: flex-start; flex-direction: column; } }
     </style>
 </head>
 <body>
@@ -43,6 +61,24 @@ $description = 'Create a new Nextcloud Talk meeting link. Use this when the user
         <div class="brand-row"><img src="assets/mantis-mini.svg" alt="Mantis Bat"><div><p class="eyebrow">Protected Mantis Bat Tool</p><h1><span class="gradient-text">Nextcloud Talk Connect</span></h1></div></div>
         <p class="copy">Create public Nextcloud Talk meeting links through a small Ghost preset. Same-name requests reuse the meeting for five minutes.</p>
         <p class="copy"><strong>Nextcloud:</strong> <?= nextcloudTalkH((string) $config->get('nextcloud.base_url')) ?> · <strong>Default name:</strong> <?= nextcloudTalkH((string) $config->get('meeting.default_name')) ?></p>
+    </section>
+
+    <section class="card">
+        <div class="history-heading"><div><h2><span class="gradient-text">Recent meetings</span></h2><p class="copy">Meeting links created in the last seven days. Times are shown in UTC.</p></div><span class="history-count"><?= (int) $meetingHistoryCount ?> <?= $meetingHistoryCount === 1 ? 'meeting' : 'meetings' ?></span></div>
+        <?php if ($meetingHistory === []): ?>
+            <div class="empty-history"><p>No meetings created in the last seven days.</p><p>New meeting links will appear here once the Ghost creates one.</p></div>
+        <?php else: ?>
+            <div class="meeting-list">
+                <?php foreach ($meetingHistory as $meeting): ?>
+                    <?php $createdAt = (int) $meeting['created_at']; $meetingUrl = (string) $meeting['meeting_url']; ?>
+                    <article class="meeting-item">
+                        <div class="meeting-item-head"><div><h3><?= nextcloudTalkH((string) $meeting['meeting_name']) ?></h3><time datetime="<?= nextcloudTalkH(date(DATE_ATOM, $createdAt)) ?>"><?= nextcloudTalkH(date('D, M j · H:i', $createdAt)) ?></time></div></div>
+                        <a class="meeting-link" href="<?= nextcloudTalkH($meetingUrl) ?>" target="_blank" rel="noopener noreferrer"><span class="meeting-link-mark" aria-hidden="true">↗</span><span>Join meeting<span class="meeting-url"><?= nextcloudTalkH($meetingUrl) ?></span></span></a>
+                    </article>
+                <?php endforeach; ?>
+            </div>
+            <?php if ($meetingHistoryCount > count($meetingHistory)): ?><p class="field-help">Showing the 500 most recent meetings out of <?= (int) $meetingHistoryCount ?> from the last seven days.</p><?php endif; ?>
+        <?php endif; ?>
     </section>
 
     <section class="card">
