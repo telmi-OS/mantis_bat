@@ -57,6 +57,7 @@ connectors/telegram/php/
 connectors/google-calendar/php/
 tools/rag-prep/php/
 tools/ghost-eval/php/
+tools/nextcloud-talk-connect/php/
 ```
 
 The Telegram connector is built for:
@@ -102,6 +103,8 @@ The RAG prep tool is built for:
 It turns uploaded TXT, PDF, and DOCX source files into one telmi OS-ready `.txt` memory artifact by extracting the text locally and letting a Ghost perform the final semantic chunking. Text-based PDFs are handled by a bundled pure-PHP parser; encrypted and scanned/image-only PDFs are rejected with an explicit message.
 
 The standalone Ghost Eval tool challenges a configured Ghost through realtime Ghost API v2 chat, asks the same Ghost to judge the answer with RAG and history disabled, pulls evaluation sets from a selected group Files space, and uploads human-readable Markdown reports back to that space. It has its own installer, protected dashboard, SQLite run queue, one-minute cron worker, optional daily or weekly suite scheduling, status, health, and maintenance pages. It does not depend on the RAG Prep tool.
+
+The standalone Nextcloud Talk Connect tool creates public Talk rooms through a protected Mantis Bat GET endpoint. Its installer validates a dedicated Nextcloud service account, generates a Ghost X-Auth key, and displays private setup URLs. The protected dashboard includes copy-ready Ghost preset fields. Concurrent calls with a normalized matching meeting name reuse one room result for five minutes.
 
 The RAG dashboard uses a private bearer URL (`index.php?key=...`), not a traditional password login. It is Hades-compatible: 7 MiB per file and per job, one job per cron call, a 20-second Ghost request timeout, and persisted three-attempt retry handling. GD and external process/PDF binaries are not required.
 
@@ -159,6 +162,7 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - [Self-Hosting PHP](docs/self-hosting-php.md)
 - [RAG Prep Tool](docs/rag-prep-tool.md)
 - [Ghost Eval Tool](docs/ghost-eval-tool.md)
+- [Nextcloud Talk Connect](docs/nextcloud-talk-connect.md)
 - [Self-Hosting RAG Prep PHP](docs/self-hosting-rag-prep-php.md)
 - [Google Calendar Connector](docs/google-calendar-connector.md)
 - [Security](docs/security.md)
@@ -184,4 +188,4 @@ Plain-language boundary:
 
 ## Status
 
-This branch contains the Telegram PHP connector module in `connectors/telegram/php/`, the Google Calendar PHP connector in `connectors/google-calendar/php/`, the RAG prep PHP tool in `tools/rag-prep/php/`, and the standalone Ghost Eval PHP tool in `tools/ghost-eval/php/`.
+This branch contains the Telegram and Google Calendar PHP connectors, the RAG Prep and Ghost Eval tools, and the standalone Nextcloud Talk Connect PHP tool.

@@ -36,12 +36,14 @@ The current shipped modules are:
 - one Google Calendar connector for PHP in `connectors/google-calendar/php/`
 - one RAG prep utility tool for PHP in `tools/rag-prep/php/`
 - one standalone Ghost Eval utility tool for PHP in `tools/ghost-eval/php/`
+- one Nextcloud Talk meeting-link utility tool for PHP in `tools/nextcloud-talk-connect/php/`
 
 The repository is shaped as a connector framework, and this is what is public today:
 
 - one Telegram PHP connector module in `connectors/telegram/php/`
 - one Google Calendar PHP connector module in `connectors/google-calendar/php/`
 - one RAG prep PHP tool in `tools/rag-prep/php/`
+- one Nextcloud Talk Connect PHP tool in `tools/nextcloud-talk-connect/php/`
 - one private paired Telegram owner
 - Ghost chat submission through `POST /chat` in queued mode
 - Ghost chat history enabled in the request payload

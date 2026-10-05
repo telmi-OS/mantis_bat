@@ -7,6 +7,10 @@ config.local.php
 # Source class with a capitalized name; keep generated runtime config files ignored.
 !connectors/google-calendar/php/src/Config.php
 !tools/ghost-eval/php/src/Config.php
+!tools/nextcloud-talk-connect/php/src/Config.php
+tools/nextcloud-talk-connect/php/storage/*.sqlite-*
+tools/nextcloud-talk-connect/php/storage/*.log
+tools/nextcloud-talk-connect/php/storage/*.lock
 
 # Runtime storage
 *.sqlite
