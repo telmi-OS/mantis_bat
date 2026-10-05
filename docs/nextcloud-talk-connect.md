@@ -12,15 +12,17 @@ See [the PHP tool README](../tools/nextcloud-talk-connect/php/README.md) for ins
 
 ## Ghost Preset
 
-Open the private dashboard URL to copy the endpoint URL, GET method, X-Auth header JSON, JSON template, and description into a Ghost preset.
+Open the private dashboard URL to copy the fixed endpoint URL, GET method, X-Auth and X-Meeting-Name header JSON, and description into a Ghost preset.
 
 The endpoint is:
 
-    GET /api/meet/create.php?name=<meeting name>
+    GET /api/meet/create.php
 
 The explicit PHP path is the preset URL for Hades, which serves PHP files directly. The extensionless /api/meet/create route is also supported when the web server applies the included rewrite or directory-index fallback.
 
 It returns meeting_url and the Talk room token. The Ghost should return the meeting URL to the user.
+
+Amygdala fills the prompt-derived meeting name into the X-Meeting-Name header at runtime. The preset does not use a JSON template or a URL parameter.
 
 ## Deduplication
 

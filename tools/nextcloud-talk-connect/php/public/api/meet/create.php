@@ -39,7 +39,7 @@ if (!$services['security']->equals((string) $config->get('api.auth_key', ''), $p
     meetJson(401, ['success' => false, 'error' => 'unauthorized']);
 }
 
-$rawName = $_GET['name'] ?? '';
+$rawName = $_SERVER['HTTP_X_MEETING_NAME'] ?? '';
 if (!is_string($rawName)) meetJson(400, ['success' => false, 'error' => 'invalid_meeting_name']);
 if (preg_match('//u', $rawName) !== 1) meetJson(400, ['success' => false, 'error' => 'invalid_meeting_name']);
 $name = preg_replace('/\s+/u', ' ', trim($rawName)) ?? '';

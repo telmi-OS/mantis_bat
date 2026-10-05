@@ -48,7 +48,7 @@ The protected dashboard provides copy-ready values. The preset is:
 
 **URL**
 
-<pre>https://&lt;mantis-host&gt;/api/meet/create.php?name={{meeting_name}}</pre>
+<pre>https://&lt;mantis-host&gt;/api/meet/create.php</pre>
 
 **Method**
 
@@ -57,26 +57,19 @@ The protected dashboard provides copy-ready values. The preset is:
 **Headers JSON**
 
 <pre>{
-  "X-Auth": "&lt;generated-key&gt;"
-}</pre>
-
-**JSON Template**
-
-<pre>{
-  "vars": {
-    "meeting_name": "{{meeting_name}}"
-  }
+  "X-Auth": "&lt;generated-key&gt;",
+  "X-Meeting-Name": "{{meeting_name}}"
 }</pre>
 
 **Description**
 
-<pre>Create a new Nextcloud Talk meeting link. Use this when the user asks to create, start, or generate a meeting or call link. Provide a short descriptive meeting name. The endpoint returns JSON containing meeting_url. Return the meeting_url to the user.</pre>
+<pre>Create a new Nextcloud Talk meeting link. Use this when the user asks to create, start, or generate a meeting or call link. Set meeting_name to a short descriptive name based on the user request; Amygdala sends it in the X-Meeting-Name header. The endpoint returns JSON containing meeting_url. Return the meeting_url to the user.</pre>
 
-The Mantis Bat endpoint reads X-Auth; the key is shown by the installer and in the protected Ghost preset. Keep it private.
+The Mantis Bat endpoint reads X-Auth and X-Meeting-Name. Amygdala substitutes the prompt-derived meeting name into the header value at runtime. Keep the generated X-Auth key private. No JSON template or URL parameter is used.
 
 ## API
 
-GET /api/meet/create.php?name=&lt;meeting name&gt; returns the following response. The extensionless /api/meet/create route is also supported when the web server applies the included rewrite or directory-index fallback:
+GET /api/meet/create.php returns the following response. Supply the meeting name in the X-Meeting-Name request header; the endpoint does not read a URL parameter or request body. The extensionless /api/meet/create route is also supported when the web server applies the included rewrite or directory-index fallback:
 
 <pre>{
   "success": true,

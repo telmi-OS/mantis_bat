@@ -17,9 +17,8 @@ if (isset($_GET['key'])) {
 
 $apiUrl = rtrim((string) $config->get('app.base_url'), '/') . '/api/meet/create.php';
 $apiKey = (string) $config->get('api.auth_key', '');
-$headers = json_encode(['X-Auth' => $apiKey], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}';
-$template = json_encode(['vars' => ['meeting_name' => '{{meeting_name}}']], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}';
-$description = 'Create a new Nextcloud Talk meeting link. Use this when the user asks to create, start, or generate a meeting or call link. Provide a short descriptive meeting name. The endpoint returns JSON containing meeting_url. Return the meeting_url to the user.';
+$headers = json_encode(['X-Auth' => $apiKey, 'X-Meeting-Name' => '{{meeting_name}}'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}';
+$description = 'Create a new Nextcloud Talk meeting link. Use this when the user asks to create, start, or generate a meeting or call link. Set meeting_name to a short descriptive name based on the user request; Amygdala sends it in the X-Meeting-Name header. The endpoint returns JSON containing meeting_url. Return the meeting_url to the user.';
 ?>
 <!doctype html>
 <html lang="en">
@@ -49,10 +48,9 @@ $description = 'Create a new Nextcloud Talk meeting link. Use this when the user
     <section class="card">
         <h2><span class="gradient-text">Ghost preset</span></h2>
         <p class="copy">Copy each value into the Ghost's GET request preset. The X-Auth key is private; rotate it by reopening the installer with its unlock URL.</p>
-        <h3>URL</h3><div class="preset-block"><button type="button" class="button-secondary" data-copy="preset-url">Copy</button><pre id="preset-url"><?= nextcloudTalkH($apiUrl) ?>?name={{meeting_name}}</pre></div>
+        <h3>URL</h3><div class="preset-block"><button type="button" class="button-secondary" data-copy="preset-url">Copy</button><pre id="preset-url"><?= nextcloudTalkH($apiUrl) ?></pre></div>
         <h3>Method</h3><div class="preset-block"><button type="button" class="button-secondary" data-copy="preset-method">Copy</button><pre id="preset-method">GET</pre></div>
         <h3>Headers JSON</h3><div class="preset-block"><button type="button" class="button-secondary" data-copy="preset-headers">Copy</button><pre id="preset-headers"><?= nextcloudTalkH($headers) ?></pre></div>
-        <h3>JSON Template</h3><div class="preset-block"><button type="button" class="button-secondary" data-copy="preset-template">Copy</button><pre id="preset-template"><?= nextcloudTalkH($template) ?></pre></div>
         <h3>Description</h3><div class="preset-block"><button type="button" class="button-secondary" data-copy="preset-description">Copy</button><pre id="preset-description"><?= nextcloudTalkH($description) ?></pre></div>
         <p class="field-help">The endpoint normalizes whitespace, trims and shortens long names, and uses the configured default when the name is empty. Repeated requests with the same name, ignoring capitalization, return the same meeting URL and token for five minutes.</p>
     </section>
