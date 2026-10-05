@@ -40,7 +40,7 @@ The runtime has no dependency on Composer execution, shell commands, external bi
 
 ## Install On A Separate PHP Host
 
-Expose only the public directory through the web server, keep src and storage private and writable by PHP, then open public/install.php over HTTPS. Apache mod_rewrite is required for the clean /api/meet/create route; the route rewrites internally to api/meet/create.php.
+Expose only the public directory through the web server, keep src and storage private and writable by PHP, then open public/install.php over HTTPS. The clean /api/meet/create route uses the Apache rewrite when available and also has a directory-index fallback for hosts that ignore per-directory rewrite rules. The explicit /api/meet/create.php path is available as a fallback.
 
 ## Ghost Preset
 
@@ -48,7 +48,7 @@ The protected dashboard provides copy-ready values. The preset is:
 
 **URL**
 
-<pre>https://&lt;mantis-host&gt;/api/meet/create?name={{meeting_name}}</pre>
+<pre>https://&lt;mantis-host&gt;/api/meet/create.php?name={{meeting_name}}</pre>
 
 **Method**
 
@@ -76,7 +76,7 @@ The Mantis Bat endpoint reads X-Auth; the key is shown by the installer and in t
 
 ## API
 
-GET /api/meet/create?name=&lt;meeting name&gt; returns:
+GET /api/meet/create.php?name=&lt;meeting name&gt; returns the following response. The extensionless /api/meet/create route is also supported when the web server applies the included rewrite or directory-index fallback:
 
 <pre>{
   "success": true,
@@ -115,7 +115,7 @@ The returned OCS response must have ocs.meta.status equal to ok and a non-empty 
 
 - public/install.php: setup and private installer unlock flow
 - public/index.php?key=...: protected dashboard and ready-to-copy Ghost preset
-- public/api/meet/create.php: GET endpoint behind the clean rewrite route
+- public/api/meet/create.php and public/api/meet/create/index.php: GET endpoint and clean-route fallback
 - public/status.php?key=...: masked runtime config and active dedupe count
 - public/health.php?key=...: private JSON health information
 - public/maintenance.php?key=...: clear local dedupe records or factory reset

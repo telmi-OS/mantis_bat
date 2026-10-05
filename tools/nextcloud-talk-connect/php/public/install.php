@@ -71,7 +71,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $installer->lock();
         $urls = [
             'Protected app and presets' => $appBase . '/index.php?key=' . rawurlencode($accessSecret),
-            'Ghost GET endpoint' => $appBase . '/api/meet/create',
+            'Ghost GET endpoint' => $appBase . '/api/meet/create.php',
             'Status' => $appBase . '/status.php?key=' . rawurlencode($statusSecret),
             'Health' => $appBase . '/health.php?key=' . rawurlencode($statusSecret),
             'Maintenance' => $appBase . '/maintenance.php?key=' . rawurlencode($statusSecret),

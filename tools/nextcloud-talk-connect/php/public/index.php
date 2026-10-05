@@ -15,7 +15,7 @@ if (isset($_GET['key'])) {
     exit;
 }
 
-$apiUrl = rtrim((string) $config->get('app.base_url'), '/') . '/api/meet/create';
+$apiUrl = rtrim((string) $config->get('app.base_url'), '/') . '/api/meet/create.php';
 $apiKey = (string) $config->get('api.auth_key', '');
 $headers = json_encode(['X-Auth' => $apiKey], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}';
 $template = json_encode(['vars' => ['meeting_name' => '{{meeting_name}}']], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}';

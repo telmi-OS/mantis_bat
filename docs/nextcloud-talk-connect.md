@@ -16,7 +16,9 @@ Open the private dashboard URL to copy the endpoint URL, GET method, X-Auth head
 
 The endpoint is:
 
-    GET /api/meet/create?name=<meeting name>
+    GET /api/meet/create.php?name=<meeting name>
+
+The explicit PHP path is the preset URL for Hades, which serves PHP files directly. The extensionless /api/meet/create route is also supported when the web server applies the included rewrite or directory-index fallback.
 
 It returns meeting_url and the Talk room token. The Ghost should return the meeting URL to the user.
 
