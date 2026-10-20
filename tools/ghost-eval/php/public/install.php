@@ -99,11 +99,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 ],
                 'ghost' => [
                     'api_base' => (string) $draft['api_base'], 'api_token' => (string) $draft['token'],
-                    'group_id' => (string) ($space['group_id'] ?? ''), 'group_name' => (string) ($space['label'] ?? 'Group'),
+                    'group_name' => (string) ($space['label'] ?? 'Group'),
                 ],
-                'files' => ['space_id' => $spaceId, 'group_label' => (string) ($space['label'] ?? 'Group'), 'folder_id' => ''],
+                'files' => ['space_id' => $spaceId, 'group_id' => (string) ($space['group_id'] ?? ''), 'group_label' => (string) ($space['label'] ?? 'Group'), 'folder_id' => ''],
                 'evaluation' => [
-                    'use_rag' => true, 'use_history' => false, 'max_cases' => 40,
+                    'use_rag' => true, 'use_history' => false, 'active_groups' => [], 'max_cases' => 40,
                     'judge_rubric' => 'Judge factual support against the supplied memory extract. Mark unsupported claims as fail, a correct refusal as pass for out-of-scope cases, and insufficient evidence as unclear.',
                 ],
                 'schedule' => [
@@ -172,7 +172,7 @@ $csrf = ghostEvalCsrf($services);
                 <h2><span class="gradient-text">Installer locked</span></h2><p>Ghost Eval is already installed. The dashboard and cron URLs are available from the original setup output. Use the installer unlock secret to replace this configuration.</p>
             <?php elseif ($stage === 'choose_space' && is_array($_SESSION['ghost_eval_install_draft'] ?? null)): ?>
                 <h2><span class="gradient-text">Choose group Files space</span></h2><p class="copy">Only group spaces where this Ghost has write access are shown.</p>
-                <form method="post"><input type="hidden" name="csrf_token" value="<?= ghostEvalH($csrf) ?>"><input type="hidden" name="action" value="install"><label>Group Files space<select name="space_id" required><option value="">Choose a group</option><?php foreach ($spaces as $space): ?><option value="<?= ghostEvalH((string) ($space['space_id'] ?? '')) ?>"><?= ghostEvalH((string) ($space['label'] ?? 'Group')) ?> · <?= ghostEvalH((string) ($space['group_role'] ?? '')) ?></option><?php endforeach; ?></select><span class="field-help">This group context is also used for challenge, judge, and optional notification chats.</span></label><button type="submit">Install Ghost Eval</button></form>
+                <form method="post"><input type="hidden" name="csrf_token" value="<?= ghostEvalH($csrf) ?>"><input type="hidden" name="action" value="install"><label>Group Files space<select name="space_id" required><option value="">Choose a group</option><?php foreach ($spaces as $space): ?><option value="<?= ghostEvalH((string) ($space['space_id'] ?? '')) ?>"><?= ghostEvalH((string) ($space['label'] ?? 'Group')) ?> · <?= ghostEvalH((string) ($space['group_role'] ?? '')) ?></option><?php endforeach; ?></select><span class="field-help">This space stores evaluation sets and reports. Chat memory groups are selected separately in the dashboard.</span></label><button type="submit">Install Ghost Eval</button></form>
             <?php elseif ($stage === 'complete'): ?>
                 <h2><span class="gradient-text">Installed</span></h2><p>Save the private URLs shown above. Open the App URL to configure evaluation options and choose a JSON suite from the group Files space.</p>
             <?php else: ?>

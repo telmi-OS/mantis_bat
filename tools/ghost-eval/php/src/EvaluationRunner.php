@@ -70,12 +70,15 @@ final class EvaluationRunner
         $id = bin2hex(random_bytes(12));
         $created = date(DATE_ATOM);
         $notifications = $this->config->get('notifications', []);
-        $groupId = (string) $this->config->get('ghost.group_id', '');
+        $activeGroups = $this->config->get('evaluation.active_groups', []);
+        if (!is_array($activeGroups)) $activeGroups = [];
+        $activeGroups = array_values(array_unique(array_filter($activeGroups, static fn($groupId): bool => is_string($groupId) && trim($groupId) !== '')));
         $settings = [
-            'group_id' => $groupId,
             'group_name' => (string) $this->config->get('ghost.group_name', ''),
             'space_id' => (string) $this->config->get('files.space_id', ''),
+            'files_group_id' => (string) $this->config->get('files.group_id', $this->config->get('ghost.group_id', '')),
             'folder_id' => (string) $this->config->get('files.folder_id', ''),
+            'active_groups' => $activeGroups,
             'use_rag' => (bool) $this->config->get('evaluation.use_rag', true),
             'use_history' => (bool) $this->config->get('evaluation.use_history', false),
             'notifications' => is_array($notifications) ? $notifications : [],
@@ -127,7 +130,7 @@ final class EvaluationRunner
 
         if ($phase === 'notify_start') {
             try {
-                $client->chat($this->notificationPrompt($run, 'started'), (string) $run['settings']['group_id'], false, false, ['run_id' => $run['id'], 'phase' => 'notification']);
+                $client->chat($this->notificationPrompt($run, 'started'), false, false);
             } catch (\Throwable $exception) {
                 $run['results']['notification_errors'][] = 'Start notice: ' . $exception->getMessage();
             }
@@ -140,10 +143,9 @@ final class EvaluationRunner
                     $case = $cases[$index];
                     $answer = $client->chat(
                         (string) $case['question'],
-                        (string) $run['settings']['group_id'],
                         (bool) $run['settings']['use_rag'],
                         (bool) $run['settings']['use_history'],
-                        ['run_id' => $run['id'], 'case_id' => $case['id'], 'phase' => 'challenge']
+                        (array) ($run['settings']['active_groups'] ?? [])
                     );
                     $run['results']['cases'][$index]['answer'] = $answer;
                     $run['results']['cases'][$index]['status'] = 'answered';
@@ -163,9 +165,7 @@ final class EvaluationRunner
             } else {
                 try {
                     $prompt = $this->judgePrompt($case, (string) $run['results']['cases'][$index]['answer']);
-                    $raw = $client->chat($prompt, (string) $run['settings']['group_id'], false, false, [
-                        'run_id' => $run['id'], 'case_id' => $case['id'], 'phase' => 'judge',
-                    ]);
+                    $raw = $client->chat($prompt, false, false);
                     $run['results']['cases'][$index]['judge_raw'] = $raw;
                     $judgment = $this->parseJudgment($raw);
                     $run['results']['cases'][$index]['verdict'] = $judgment['verdict'];
@@ -201,7 +201,7 @@ final class EvaluationRunner
             $run['phase'] = $this->shouldNotifyEnd($run) ? 'notify_end' : 'finish';
         } elseif ($phase === 'notify_end') {
             try {
-                $client->chat($this->notificationPrompt($run, 'finished'), (string) $run['settings']['group_id'], false, false, ['run_id' => $run['id'], 'phase' => 'notification']);
+                $client->chat($this->notificationPrompt($run, 'finished'), false, false);
             } catch (\Throwable $exception) {
                 $run['results']['notification_errors'][] = 'Finish notice: ' . $exception->getMessage();
             }
@@ -343,7 +343,10 @@ final class EvaluationRunner
             '- **Suite SHA-256:** `' . $run['suite_sha256'] . '`',
             '- **Started:** ' . $this->md((string) $run['created_at']),
             '- **Report generated:** ' . $this->md(date(DATE_ATOM)),
-            '- **Group:** ' . $this->md((string) ($run['settings']['group_name'] ?? '')) . ' (`' . $this->md((string) ($run['settings']['group_id'] ?? '')) . '`)',
+            '- **Files space:** ' . $this->md((string) ($run['settings']['group_name'] ?? '')) . ' (`' . $this->md((string) ($run['settings']['files_group_id'] ?? '')) . '`)',
+            '- **RAG memory groups:** ' . $this->md(!(bool) ($run['settings']['use_rag'] ?? false)
+                ? 'not used (RAG off)'
+                : (implode(', ', (array) ($run['settings']['active_groups'] ?? [])) ?: 'personal context only')),
             '- **Target chat:** realtime; RAG ' . (($run['settings']['use_rag'] ?? false) ? 'on' : 'off') . '; history ' . (($run['settings']['use_history'] ?? false) ? 'on' : 'off'),
             '- **Judge chat:** realtime; RAG off; history off',
             '- **Cases:** ' . count($cases) . ' total — ' . $counts['pass'] . ' pass, ' . $counts['fail'] . ' fail, ' . $counts['unclear'] . ' unclear, ' . $counts['error'] . ' error',

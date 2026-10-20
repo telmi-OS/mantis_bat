@@ -60,12 +60,15 @@ final class Config
             'ghost' => [
                 'api_base' => $this->get('ghost.api_base'),
                 'api_token' => $security->mask((string) $this->get('ghost.api_token', '')),
-                'group_id' => $this->get('ghost.group_id'),
+            ],
+            'evaluation' => [
+                'active_groups' => $this->get('evaluation.active_groups', []),
                 'use_rag' => $this->get('evaluation.use_rag'),
                 'use_history' => $this->get('evaluation.use_history'),
             ],
             'files' => [
                 'space_id' => $this->get('files.space_id'),
+                'group_id' => $this->get('files.group_id', $this->get('ghost.group_id')),
                 'group_label' => $this->get('files.group_label'),
                 'folder_id' => $this->get('files.folder_id'),
             ],
@@ -114,12 +117,12 @@ final class Config
                 'installer_secret_hash' => '',
             ],
             'ghost' => [
-                'api_base' => 'https://dev.telmi-ai.com/api/ghost/v2', 'api_token' => '', 'group_id' => '',
+                'api_base' => 'https://dev.telmi-ai.com/api/ghost/v2', 'api_token' => '',
                 'group_name' => '',
             ],
-            'files' => ['space_id' => '', 'group_label' => '', 'folder_id' => ''],
+            'files' => ['space_id' => '', 'group_id' => '', 'group_label' => '', 'folder_id' => ''],
             'evaluation' => [
-                'use_rag' => true, 'use_history' => false,
+                'use_rag' => true, 'use_history' => false, 'active_groups' => [],
                 'max_cases' => 40, 'judge_rubric' => 'Judge factual support against the supplied memory extract. Mark unsupported claims as fail, a correct refusal as pass for out-of-scope cases, and insufficient evidence as unclear.',
             ],
             'schedule' => [

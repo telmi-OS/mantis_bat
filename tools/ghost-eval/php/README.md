@@ -17,7 +17,7 @@ Ghost Eval is a standalone evaluation app for challenging a configured telmi OS 
 
 - loads a JSON evaluation set from the configured group Files space each time a run starts
 - sends each question to the configured Ghost through realtime `/chat`
-- lets you enable or disable the challenged Ghost's RAG and chat history
+- lets you enable or disable the challenged Ghost's RAG and chat history, and choose group memory IDs for challenge answers
 - asks the same Ghost to judge the answer with RAG and chat history disabled, using the case's reference memory extract and grading rubric
 - saves a dated Markdown report locally and uploads it to the selected group Files space
 - optionally sends bounded group notices for run start, completion, operational errors, and failed P0 cases
@@ -58,7 +58,7 @@ Each case requires `question` and `memory_extract`. It can specify `grading_rubr
 - chat requests are not automatically replayed after transport errors
 - HTTP cron requests are rate-limited to one per 50 seconds per source IP
 
-The target Ghost's RAG and history settings apply only to challenge answers. The judge always uses the same Ghost with RAG and history disabled. Since the challenged Ghost also acts as judge, the verdict is a review signal rather than independent ground truth.
+The target Ghost's RAG, selected group memories, and history settings apply only to challenge answers. Chat calls use the Ghost's personal conversation context; selected `active_groups` add group memory without changing that context. The judge uses the same Ghost with `options.use_rag: false`, `options.use_history: false`, and no selected memory groups. Since the challenged Ghost also acts as judge, the verdict is a review signal rather than independent ground truth.
 
 ## Group Notifications
 

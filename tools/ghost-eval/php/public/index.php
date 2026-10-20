@@ -30,12 +30,27 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $action = isset($_POST['action']) && is_string($_POST['action']) ? $_POST['action'] : '';
         if ($action === 'save_settings') {
             $all = $config->all();
+            $settingsSection = (string) ($_POST['settings_section'] ?? 'challenge');
             $all['evaluation']['use_rag'] = (string) ($_POST['use_rag'] ?? '') === '1';
             $all['evaluation']['use_history'] = (string) ($_POST['use_history'] ?? '') === '1';
             $all['evaluation']['judge_rubric'] = trim((string) ($_POST['judge_rubric'] ?? ''));
             if ($all['evaluation']['judge_rubric'] === '') throw new RuntimeException('Judge rubric cannot be empty.');
             $all['evaluation']['max_cases'] = min(40, max(1, (int) ($_POST['max_cases'] ?? 40)));
-            if ((string) ($_POST['settings_section'] ?? '') === 'notifications') {
+            if ($settingsSection === 'challenge') {
+                $submittedGroups = $_POST['active_groups'] ?? [];
+                if (!is_array($submittedGroups)) throw new RuntimeException('Choose group IDs from the available group list.');
+                $submittedGroups = array_values(array_unique(array_filter($submittedGroups, static fn($id): bool => is_string($id) && trim($id) !== '')));
+                $availableGroups = [];
+                foreach ($services['ghost']->groupSpaces(false) as $space) {
+                    $id = (string) ($space['group_id'] ?? '');
+                    if ($id !== '') $availableGroups[$id] = true;
+                }
+                foreach ($submittedGroups as $id) {
+                    if (!isset($availableGroups[$id])) throw new RuntimeException('A selected RAG memory group is no longer available to this Ghost. Reload the dashboard and choose from the current group list.');
+                }
+                $all['evaluation']['active_groups'] = $submittedGroups;
+            }
+            if ($settingsSection === 'notifications') {
                 $all['notifications'] = [
                     'enabled' => isset($_POST['notify_start']) || isset($_POST['notify_finish']) || isset($_POST['notify_errors']) || isset($_POST['notify_p0']),
                     'on_start' => isset($_POST['notify_start']),
@@ -134,6 +149,13 @@ try {
 } catch (Throwable $exception) {
     $filesError = $exception->getMessage();
 }
+$groupSpaces = [];
+$groupSpacesError = '';
+try {
+    $groupSpaces = $services['ghost']->groupSpaces(false);
+} catch (Throwable $exception) {
+    $groupSpacesError = $exception->getMessage();
+}
 $runs = $storage->listRuns(20);
 $csrf = ghostEvalCsrf($services);
 $notifications = $config->get('notifications', []);
@@ -155,7 +177,7 @@ $schedule = is_array($schedule) ? $schedule : [];
 <main class="page-shell">
     <section class="hero">
         <div class="brand-row"><img src="assets/mantis-mini.svg" alt="Mantis Bat"><div><p class="eyebrow">Standalone Mantis Bat Tool</p><h1><span class="gradient-text">Ghost Eval</span></h1></div></div>
-        <div class="hero-grid"><div class="copy"><p>Challenge the configured Ghost with evaluation cases from its group Files space. The target answers in realtime; the same Ghost judges each answer with RAG and history disabled.</p><p><strong>Group Files:</strong> <?= ghostEvalH((string) $config->get('files.group_label', 'Group')) ?> · <code><?= ghostEvalH((string) $config->get('ghost.group_id', '')) ?></code></p></div><div class="hero-shot"><img src="assets/telmi-os-desktop.png" alt="telmi OS desktop"></div></div>
+        <div class="hero-grid"><div class="copy"><p>Challenge the configured Ghost with evaluation cases from its group Files space. Challenge answers use the selected RAG memory groups; the judge uses the supplied case evidence with RAG and history disabled.</p><p><strong>Group Files:</strong> <?= ghostEvalH((string) $config->get('files.group_label', 'Group')) ?> · <code><?= ghostEvalH((string) $config->get('files.group_id', $config->get('ghost.group_id', ''))) ?></code></p></div><div class="hero-shot"><img src="assets/telmi-os-desktop.png" alt="telmi OS desktop"></div></div>
     </section>
 
     <?php if ($notice !== ''): ?><section class="card notice-card"><strong><?= ghostEvalH($notice) ?></strong></section><?php endif; ?>
@@ -178,6 +200,8 @@ $schedule = is_array($schedule) ? $schedule : [];
             <h2><span class="gradient-text">Challenge options</span></h2>
             <form method="post"><input type="hidden" name="csrf_token" value="<?= ghostEvalH($csrf) ?>"><input type="hidden" name="action" value="save_settings"><input type="hidden" name="settings_section" value="challenge">
                 <label class="check-row"><input type="checkbox" name="use_rag" value="1" <?= $config->get('evaluation.use_rag', true) ? 'checked' : '' ?>> Use this Ghost’s RAG for challenge answers</label>
+                <label>RAG memory groups<select name="active_groups[]" multiple size="5"><?php foreach ($groupSpaces as $space): $groupId = (string) ($space['group_id'] ?? ''); if ($groupId === '') continue; ?><option value="<?= ghostEvalH($groupId) ?>" <?= in_array($groupId, (array) $config->get('evaluation.active_groups', []), true) ? 'selected' : '' ?>><?= ghostEvalH((string) ($space['label'] ?? 'Group')) ?> · <?= ghostEvalH($groupId) ?> (<?= ghostEvalH((string) ($space['group_role'] ?? 'member')) ?>)</option><?php endforeach; ?></select><span class="field-help">Choose one or more current groups whose memory should be added alongside the Ghost’s personal-context memory. The conversation stays in personal context. Groups are sent only when RAG is enabled. IDs are validated against the current Files spaces list. Use Ctrl/Cmd to select multiple groups.</span></label>
+                <?php if ($groupSpacesError !== ''): ?><p class="status-bad">Could not load groups: <?= ghostEvalH($groupSpacesError) ?></p><?php elseif ($groupSpaces === []): ?><p class="field-help">No group memberships are currently available to this Ghost.</p><?php endif; ?>
                 <label class="check-row"><input type="checkbox" name="use_history" value="1" <?= $config->get('evaluation.use_history', false) ? 'checked' : '' ?>> Use this Ghost’s chat history for challenge answers</label>
                 <label>Maximum cases per run<input type="number" name="max_cases" min="1" max="40" value="<?= (int) $config->get('evaluation.max_cases', 40) ?>"><span class="field-help">A hard cap keeps runs bounded on Hades.</span></label>
                 <label>Default judge rubric<textarea name="judge_rubric" rows="4" required><?= ghostEvalH((string) $config->get('evaluation.judge_rubric', '')) ?></textarea><span class="field-help">A case may provide its own <code>grading_rubric</code>.</span></label>

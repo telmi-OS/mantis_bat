@@ -13,19 +13,14 @@ final class GhostClient
         if (!extension_loaded('curl')) throw new RuntimeException('PHP cURL is required.');
     }
 
-    public function chat(string $message, string $groupId, bool $useRag, bool $useHistory, array $meta = []): string
+    public function chat(string $message, bool $useRag, bool $useHistory, array $activeGroups = []): string
     {
-        $requestId = bin2hex(random_bytes(12));
         $payload = [
-            'group_id' => $groupId,
             'message' => $message,
-            'message_id' => 'ghost-eval-' . $requestId,
-            'message_ts' => date(DATE_ATOM),
             'mode' => 'realtime',
-            'use_history' => $useHistory,
-            'meta' => array_merge(['source' => 'mantis_bat_ghost_eval', 'request_id' => $requestId], $meta),
             'options' => ['mode' => 'realtime', 'use_rag' => $useRag, 'use_history' => $useHistory],
         ];
+        if ($useRag && $activeGroups !== []) $payload['active_groups'] = array_values($activeGroups);
         $body = $this->requestJson('POST', '/chat', $payload, 30, 15);
         $reply = $body['reply'] ?? $body['data']['reply'] ?? null;
         if (!is_string($reply) || trim($reply) === '') {
@@ -34,7 +29,7 @@ final class GhostClient
         return trim($reply);
     }
 
-    public function groupSpaces(): array
+    public function groupSpaces(bool $writableOnly = true): array
     {
         $body = $this->requestJson('GET', '/files?action=spaces');
         $spaces = $body['data']['spaces'] ?? [];
@@ -42,7 +37,7 @@ final class GhostClient
         return array_values(array_filter($spaces, static fn($space): bool => is_array($space)
             && ($space['identity_type'] ?? '') === 'group'
             && is_string($space['group_id'] ?? null)
-            && in_array(($space['group_role'] ?? ''), ['owner', 'write'], true)));
+            && (!$writableOnly || in_array(($space['group_role'] ?? ''), ['owner', 'write'], true))));
     }
 
     public function listFiles(string $spaceId, string $folderId = ''): array

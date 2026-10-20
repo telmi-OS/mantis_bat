@@ -9,11 +9,11 @@ Ghost Eval is a standalone PHP utility in `tools/ghost-eval/php/`. It evaluates 
 1. Finds writable group Files spaces for the configured Ghost JWT.
 2. Pulls a selected JSON evaluation set from the chosen group Files space at run start.
 3. Records the exact suite snapshot and SHA-256 in the local run record.
-4. Asks the configured Ghost each question through realtime `/chat`, with configurable `use_rag` and `use_history` options.
+4. Asks the configured Ghost each question through realtime `/chat`, with configurable RAG, selected `active_groups`, and `use_history` options.
 5. Asks the same Ghost to judge each answer through realtime `/chat` with RAG and history both disabled.
 6. Writes a dated Markdown report and uploads it to the selected group Files space.
 
-The module does not call `/rag_search` or any other RAG API. The challenged Ghost uses its own RAG through the `use_rag` chat option when enabled. The `memory_extract` in a test case is reference evidence supplied to the judge; it is not fetched from the Ghost's memory.
+The module does not call `/rag_search` or any other RAG API. It controls retrieval through `/chat`'s `options.use_rag` flag. Selected `active_groups` add those groups' memories to challenge answers; the conversation remains in the Ghost's personal context. The `memory_extract` in a test case is reference evidence supplied to the judge; it is not fetched from the Ghost's memory.
 
 The judge is the same Ghost as the challenged assistant. The report calls this out because the judge's own personality and instructions can affect its verdict. Treat the verdict as a review signal, not independent ground truth.
 
@@ -38,7 +38,7 @@ The judge is the same Ghost as the challenged assistant. The report calls this o
 
 The live `storage/config.php` is created by the installer and is intentionally not tracked or included in release archives. `storage/config.example.php` is a reference template only; it contains no live credentials.
 
-The installer checks `/settings` and `/files?action=spaces`. It only offers group spaces where the Ghost has owner or write access. The selected group supplies the default chat context, Files space, and notification destination.
+The installer checks `/settings` and `/files?action=spaces`. It only offers group spaces where the Ghost has owner or write access as the Files destination. The dashboard separately lists available group IDs for RAG memory selection. Chat requests omit `group_id`, so they use the Ghost's personal conversation context; notifications name their group in the message.
 
 The dashboard URL is a generated bearer URL such as `index.php?key=...`. Opening it creates a protected PHP session and redirects to a clean URL. Keep it private. The Ghost JWT stays in the server-side runtime config and is never sent to browser JavaScript.
 
@@ -76,10 +76,11 @@ Each suite is capped at 1 MiB and 40 cases. Questions, reference excerpts, and r
 Challenge settings are saved in the dashboard:
 
 - `use_rag`: whether the challenged Ghost uses its own RAG for each answer
+- `active_groups`: group IDs whose memory is added to challenge answers when RAG is enabled
 - `use_history`: whether the challenged Ghost uses chat history for each answer
 - chat mode: always realtime
 
-The evaluator sends the selected group ID with each call. The judge always receives `use_rag: false` and `use_history: false`; its prompt includes the case question, reference memory extract, challenged answer, and rubric. The judge is instructed to treat the case data as quoted evidence, not as instructions.
+The challenge uses the selected `active_groups` and the configured RAG/history flags. The judge receives `options.use_rag: false` and `options.use_history: false`, with no selected memory groups; its prompt includes the case question, reference memory extract, challenged answer, and rubric. The judge is instructed to treat the case data as quoted evidence, not as instructions.
 
 ## Rate And Runtime Limits
 
@@ -108,7 +109,7 @@ Challenge, judge, report upload, and optional group notification steps resume fr
 
 ## Group Notifications
 
-Notifications are optional and can be enabled for run start, run finish, operational errors, and P0 case failures. The evaluator sends a normal realtime chat instruction such as `Tell Showcase Ghost Eval run ...`; notifications use RAG and history disabled.
+Notifications are optional and can be enabled for run start, run finish, operational errors, and P0 case failures. The evaluator sends a normal realtime chat instruction such as `Tell Showcase Ghost Eval run ...`, without a `group_id` or `active_groups`; notifications use RAG and history disabled.
 
 > Turn on the Ghost's **Agentic** capability in its telmi OS Ghost settings before enabling group notifications. Notifications use normal “Tell GROUPNAME …” chat. Autonomous Mode and Action tools are not required.
 

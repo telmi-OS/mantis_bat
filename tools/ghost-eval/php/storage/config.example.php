@@ -16,11 +16,10 @@ return [
     'ghost' => [
         'api_base' => 'https://dev.telmi-ai.com/api/ghost/v2',
         'api_token' => '',
-        'group_id' => '',
         'group_name' => '',
     ],
-    'files' => ['space_id' => '', 'group_label' => '', 'folder_id' => ''],
-    'evaluation' => ['use_rag' => true, 'use_history' => false, 'max_cases' => 40, 'judge_rubric' => ''],
+    'files' => ['space_id' => '', 'group_id' => '', 'group_label' => '', 'folder_id' => ''],
+    'evaluation' => ['use_rag' => true, 'use_history' => false, 'active_groups' => [], 'max_cases' => 40, 'judge_rubric' => ''],
     'schedule' => [
         'enabled' => false, 'suite_file_id' => '', 'suite_file_name' => '',
         'interval' => 'daily', 'interval_seconds' => 86400, 'next_run_at' => 0,
