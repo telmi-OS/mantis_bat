@@ -7,8 +7,7 @@ namespace MantisBat\GhostEval;
 use RuntimeException;
 
 /**
- * Module configuration adapter, following the Config.php convention used by
- * the Mantis Bat Google Calendar connector. The live config remains in storage.
+ * Module configuration adapter. The live config remains in storage.
  */
 final class Config
 {

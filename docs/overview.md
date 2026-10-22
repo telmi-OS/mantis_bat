@@ -13,7 +13,6 @@ Mantis Bat handles the edge runtime:
 - inbound channel events
 - outbound channel delivery
 - webhook and cron runtime concerns
-- calendar collection, recurring-event expansion, and encrypted sync state
 - pairing and connector-level access control
 - channel-specific command routing
 - utility-tool upload and processing flows
@@ -33,7 +32,6 @@ Mantis Bat handles the edge runtime:
 The current shipped modules are:
 
 - one Telegram bot connector for PHP in `connectors/telegram/php/`
-- one Google Calendar connector for PHP in `connectors/google-calendar/php/`
 - one RAG prep utility tool for PHP in `tools/rag-prep/php/`
 - one standalone Ghost Eval utility tool for PHP in `tools/ghost-eval/php/`
 - one Nextcloud Talk meeting-link utility tool for PHP in `tools/nextcloud-talk-connect/php/`
@@ -41,7 +39,6 @@ The current shipped modules are:
 The repository is shaped as a connector framework, and this is what is public today:
 
 - one Telegram PHP connector module in `connectors/telegram/php/`
-- one Google Calendar PHP connector module in `connectors/google-calendar/php/`
 - one RAG prep PHP tool in `tools/rag-prep/php/`
 - one Nextcloud Talk Connect PHP tool in `tools/nextcloud-talk-connect/php/`
 - one private paired Telegram owner

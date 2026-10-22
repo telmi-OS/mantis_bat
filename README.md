@@ -54,7 +54,6 @@ The current public implementations are:
 
 ```text
 connectors/telegram/php/
-connectors/google-calendar/php/
 tools/rag-prep/php/
 tools/ghost-eval/php/
 tools/nextcloud-talk-connect/php/
@@ -71,18 +70,6 @@ The Telegram connector is built for:
 - cron or URL cron
 
 It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2.
-
-The Google Calendar connector is built for:
-
-- PHP 8.1+
-- SQLite
-- cURL
-- HTTPS
-- standard PHP hosting
-- browser configuration
-- cron or URL cron
-
-It connects one selected Google Calendar to one telmi OS Ghost through Ghost API v2. Google Calendar is the source of truth. The connector expands recurring events into individual occurrences in the next 28 days, stores encrypted local state, and sends all pending changes in one natural-language prompt. The Ghost manages Board schedules and group communication.
 
 The RAG prep tool is built for:
 
@@ -164,7 +151,6 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - [Ghost Eval Tool](docs/ghost-eval-tool.md)
 - [Nextcloud Talk Connect](docs/nextcloud-talk-connect.md)
 - [Self-Hosting RAG Prep PHP](docs/self-hosting-rag-prep-php.md)
-- [Google Calendar Connector](docs/google-calendar-connector.md)
 - [Security](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
@@ -188,4 +174,4 @@ Plain-language boundary:
 
 ## Status
 
-This branch contains the Telegram and Google Calendar PHP connectors, the RAG Prep and Ghost Eval tools, and the standalone Nextcloud Talk Connect PHP tool.
+This branch contains the Telegram PHP connector, the RAG Prep and Ghost Eval tools, and the standalone Nextcloud Talk Connect PHP tool.
