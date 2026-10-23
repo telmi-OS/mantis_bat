@@ -48,15 +48,18 @@ It is talking to a system that already supports:
 - <img src="assets/logo/mantis-pixel-bullet.svg" width="14" alt=""> proactive inbox delivery from Ghost to channel
 - <img src="assets/logo/mantis-pixel-bullet.svg" width="14" alt=""> the same product family that also supports managed and hosted deployment paths
 
-## Current Shipping Module
+## Current Shipping Modules
 
-The current public implementation is:
+The current public implementations are:
 
 ```text
 connectors/telegram/php/
+tools/rag-prep/php/
+tools/ghost-eval/php/
+tools/nextcloud-talk-connect/php/
 ```
 
-This module is built for:
+The Telegram connector is built for:
 
 - PHP 8.1+
 - SQLite
@@ -67,6 +70,30 @@ This module is built for:
 - cron or URL cron
 
 It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2.
+
+The RAG prep tool is built for:
+
+- PHP 8.1+
+- SQLite
+- cURL
+- ZipArchive
+- fileinfo
+- mbstring
+- DOMDocument
+- iconv
+- zlib
+- HTTPS
+- standard PHP hosting
+- browser installer
+- cron or URL cron
+
+It turns uploaded TXT, PDF, and DOCX source files into one telmi OS-ready `.txt` memory artifact by extracting the text locally and letting a Ghost perform the final semantic chunking. Text-based PDFs are handled by a bundled pure-PHP parser; encrypted and scanned/image-only PDFs are rejected with an explicit message.
+
+The standalone Ghost Eval tool challenges a configured Ghost through realtime Ghost API v2 chat, with selectable RAG memory groups and history settings. The same Ghost judges each answer with RAG and history disabled. Evaluation sets and human-readable Markdown reports use a separately selected group Files space. The tool has its own installer, protected dashboard, SQLite run queue, one-minute cron worker, optional daily or weekly suite scheduling, status, health, and maintenance pages. It does not depend on the RAG Prep tool.
+
+The standalone Nextcloud Talk Connect tool creates public Talk rooms through a protected Mantis Bat GET endpoint. Its installer validates a dedicated Nextcloud service account, generates a Ghost X-Auth key, and displays private setup URLs. The protected dashboard includes copy-ready Ghost preset fields. Concurrent calls with a normalized matching meeting name reuse one room result for five minutes.
+
+The RAG dashboard uses a private bearer URL (`index.php?key=...`), not a traditional password login. It is Hades-compatible: 7 MiB per file and per job, one job per cron call, a 20-second Ghost request timeout, and persisted three-attempt retry handling. GD and external process/PDF binaries are not required.
 
 Current operational pages include:
 
@@ -120,6 +147,10 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - [Quickstart](docs/quickstart.md)
 - [Ghost API v2](docs/ghost-api-v2.md)
 - [Self-Hosting PHP](docs/self-hosting-php.md)
+- [RAG Prep Tool](docs/rag-prep-tool.md)
+- [Ghost Eval Tool](docs/ghost-eval-tool.md)
+- [Nextcloud Talk Connect](docs/nextcloud-talk-connect.md)
+- [Self-Hosting RAG Prep PHP](docs/self-hosting-rag-prep-php.md)
 - [Security](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
@@ -143,4 +174,4 @@ Plain-language boundary:
 
 ## Status
 
-`v0.1.0` currently ships the Telegram PHP connector module in `connectors/telegram/php/` and the full self-hosted install flow around it.
+This branch contains the Telegram PHP connector, the RAG Prep and Ghost Eval tools, and the standalone Nextcloud Talk Connect PHP tool.

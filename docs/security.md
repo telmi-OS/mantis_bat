@@ -22,6 +22,7 @@ Baseline controls:
 - secret-protected status and health endpoints
 - secret-protected pairing recovery and maintenance endpoints
 - secret redaction in logs
+- private cron unlock key outside the public directory
 
 ## Secrets
 

@@ -1,0 +1,13 @@
+{
+  "modules": {
+    "tools:ghost-eval:php": {
+      "title": "Ghost Eval (PHP)",
+      "short_description": "Evaluate a configured telmi OS Ghost through realtime chat and publish Markdown reports to group Files.",
+      "entrypoint": "install.php",
+      "icon_repo_path": "tools/ghost-eval/php/public/assets/mantis-mini.svg",
+      "runtime": "php",
+      "install_type": "php-public",
+      "plan_tag": "pro"
+    }
+  }
+}

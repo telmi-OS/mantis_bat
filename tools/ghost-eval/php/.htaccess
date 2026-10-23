@@ -1,0 +1,17 @@
+<FilesMatch "\.(env|sqlite|db|json|log)$">
+ Require all denied
+</FilesMatch>
+Options -Indexes
+<IfModule mod_rewrite.c>
+ RewriteEngine On
+ RewriteRule ^src(/|$) - [F,L,NC]
+ RewriteRule ^storage(/|$) - [F,L,NC]
+ RewriteRule ^examples(/|$) - [F,L,NC]
+ RewriteRule ^scripts(/|$) - [F,L,NC]
+ RewriteRule ^(README\.md|CHANGELOG\.md|LICENSE|NOTICE)$ - [F,L,NC]
+</IfModule>
+<IfModule mod_headers.c>
+ Header always set X-Content-Type-Options "nosniff"
+ Header always set X-Frame-Options "DENY"
+ Header always set Referrer-Policy "no-referrer"
+</IfModule>
