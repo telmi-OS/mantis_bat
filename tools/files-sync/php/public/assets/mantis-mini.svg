@@ -1,0 +1,37 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mb-body" x1="56" y1="48" x2="206" y2="214" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B76BFF"/>
+      <stop offset="0.55" stop-color="#6C63FF"/>
+      <stop offset="1" stop-color="#2FE7FF"/>
+    </linearGradient>
+    <linearGradient id="mb-claw" x1="30" y1="64" x2="224" y2="184" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D98BFF"/>
+      <stop offset="1" stop-color="#27D6FF"/>
+    </linearGradient>
+    <filter id="mb-glow" x="-30" y="-30" width="316" height="316" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0  0 1 0 0 0.45  0 0 1 0 0.95  0 0 0 0.9 0"/>
+    </filter>
+  </defs>
+  <g filter="url(#mb-glow)" opacity="0.45">
+    <ellipse cx="128" cy="128" rx="84" ry="88" fill="url(#mb-body)"/>
+  </g>
+  <path d="M90 48C82 31 67 21 48 19" stroke="url(#mb-claw)" stroke-width="10" stroke-linecap="round"/>
+  <path d="M166 48C174 31 189 21 208 19" stroke="url(#mb-claw)" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="46" cy="18" r="10" fill="#B76BFF"/>
+  <circle cx="210" cy="18" r="10" fill="#2FE7FF"/>
+  <path d="M56 74C34 74 20 93 20 116C20 136 30 149 51 149C63 149 72 142 80 132L91 119L84 95C78 82 70 74 56 74Z" fill="url(#mb-claw)"/>
+  <path d="M200 74C222 74 236 93 236 116C236 136 226 149 205 149C193 149 184 142 176 132L165 119L172 95C178 82 186 74 200 74Z" fill="url(#mb-claw)"/>
+  <path d="M128 44C82 44 50 82 50 135C50 187 82 220 128 220C174 220 206 187 206 135C206 82 174 44 128 44Z" fill="url(#mb-body)"/>
+  <circle cx="98" cy="114" r="20" fill="#0C0A17"/>
+  <circle cx="158" cy="114" r="20" fill="#0C0A17"/>
+  <circle cx="100" cy="114" r="8" fill="#2FE7FF"/>
+  <circle cx="160" cy="114" r="8" fill="#2FE7FF"/>
+  <path d="M70 188L54 212" stroke="#A36BFF" stroke-width="10" stroke-linecap="round"/>
+  <path d="M94 198L78 226" stroke="#8D68FF" stroke-width="10" stroke-linecap="round"/>
+  <path d="M118 204L106 232" stroke="#7B6BFF" stroke-width="10" stroke-linecap="round"/>
+  <path d="M138 204L150 232" stroke="#50BFFF" stroke-width="10" stroke-linecap="round"/>
+  <path d="M162 198L178 226" stroke="#36D2FF" stroke-width="10" stroke-linecap="round"/>
+  <path d="M186 188L202 212" stroke="#2EDBFF" stroke-width="10" stroke-linecap="round"/>
+</svg>
