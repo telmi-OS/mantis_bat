@@ -1,0 +1,626 @@
+# Telmi Files Sync for Windows — Ghost API v2, Windows PowerShell 5.1 (built in).
+# No Python, curl, WSL, modules, installation or administrator access required.
+# Usage:
+#   powershell.exe -NoProfile -File .\telmi-files-sync-windows.ps1 [--dry-run] [--pull] [--push] [--verbose]
+#
+# Contract: SERVER WINS. No deletion propagation. Remote inventory MUST contain
+# at least one file. HTTP/API/validation/transfer failures HARD STOP.
+# Existing files: file_replace (file_id + expected_sha256); new: upload.
+# GETs may retry; mutation POSTs are NEVER retried automatically.
+#
+# Keep credentials secret. If you configure a JWT here, restrict this file's ACL.
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+# --- CONFIGURATION -----------------------------------------------------------
+# Environment variables with the same names override these defaults.
+$Config = @{
+    TELMI_BASE_URL     = 'https://YOUR-TELMI-HOST.example'
+    TELMI_SPACE_ID     = 'PASTE_YOUR_SPACE_ID_HERE'
+    TELMI_GHOST_JWT    = 'PASTE_YOUR_GHOST_JWT_HERE'
+    SYNC_DIR           = (Join-Path $env:USERPROFILE 'TelmiSync\MySpace')
+    STATE_FILE         = '.telmi-sync-state.json'
+    LOG_DIR            = (Join-Path $env:LOCALAPPDATA 'TelmiFilesSync\Logs')
+    LOCK_DIR           = (Join-Path $env:LOCALAPPDATA 'TelmiFilesSync\Locks')
+    HTTP_RETRIES       = 3                # GET requests only
+    HTTP_RETRY_SLEEP   = 3                # seconds
+    HTTP_READ_TIMEOUT  = 120              # seconds
+    HTTP_TRANSFER_TIMEOUT = 3600          # seconds
+    LIST_PAGE_SIZE     = 500              # API maximum; no pagination available
+    MAX_FOLDER_DEPTH   = 32
+}
+foreach ($key in @($Config.Keys)) {
+    $override = [Environment]::GetEnvironmentVariable($key, 'Process')
+    if (-not [string]::IsNullOrEmpty($override)) { $Config[$key] = $override }
+}
+
+# --- HELPERS -----------------------------------------------------------------
+function Log([string]$Message) {
+    $line = '{0} {1}' -f ([DateTimeOffset]::Now.ToString('yyyy-MM-ddTHH:mm:sszzz')), $Message
+    [Console]::Error.WriteLine($line)
+    if ($script:LogPath) {
+        [IO.File]::AppendAllText($script:LogPath, "$line`r`n", (New-Object System.Text.UTF8Encoding($false)))
+    }
+}
+function Stop-Sync([string]$Message) { throw [InvalidOperationException]::new($Message) }
+function Prop($Obj, [string]$Name) {
+    if ($null -eq $Obj) { return $null }
+    if ($Obj -is [System.Collections.IDictionary]) { return ,$Obj[$Name] }
+    $p = $Obj.PSObject.Properties[$Name]
+    if ($null -eq $p) { return $null }
+    return ,$p.Value
+}
+function Sha([string]$Path) {
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $algo = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($algo.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() }
+    finally { $algo.Dispose(); $stream.Dispose() }
+}
+function Is-Sha($Value) { return ($Value -is [string] -and $Value -cmatch '^[0-9a-fA-F]{64}$') }
+function Canon([string]$Name) { return $Name.Normalize([Text.NormalizationForm]::FormC).ToUpperInvariant() }
+function Check-Name($Name, [string]$Label) {
+    if ($Name -isnot [string] -or $Name.Length -eq 0 -or $Name -eq '.' -or $Name -eq '..' -or
+        $Name -match '[<>:"/\\|?*\x00-\x1f]' -or $Name.EndsWith(' ') -or $Name.EndsWith('.') -or
+        $Name -match '^(?i:(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9]|LPT[1-9]))(\.|$)') {
+        Stop-Sync "unsafe Windows $Label name: '$Name'"
+    }
+    return $Name
+}
+function Parse-Int([string]$Key, [int]$Min, [int]$Max) {
+    $n = 0
+    if (-not [int]::TryParse([string]$Config[$Key], [ref]$n) -or $n -lt $Min -or $n -gt $Max) {
+        Stop-Sync "invalid $Key (expected integer $Min..$Max)"
+    }
+    return $n
+}
+function Rel-Path([string]$Rel) {
+    $path = $script:Root
+    foreach ($part in $Rel.Split('/')) {
+        $null = Check-Name $part 'path component'
+        $path = [IO.Path]::Combine($path, $part)
+        if ([IO.File]::Exists($path) -or [IO.Directory]::Exists($path)) { Assert-NotLink $path }
+    }
+    $full = [IO.Path]::GetFullPath($path)
+    $prefix = $script:Root.TrimEnd('\') + '\'
+    if (-not $full.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        Stop-Sync "path escapes sync root: '$Rel'"
+    }
+    return $full
+}
+function Assert-NotLink([string]$Path) {
+    $attr = [IO.File]::GetAttributes($Path)
+    if (($attr -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        Stop-Sync "reparse point/junction/symlink refused: $Path"
+    }
+}
+function Parent-Rel([string]$Rel) { $i = $Rel.LastIndexOf('/'); if ($i -lt 0) { return '' }; return $Rel.Substring(0, $i) }
+function Leaf-Rel([string]$Rel) { $i = $Rel.LastIndexOf('/'); return $Rel.Substring($i + 1) }
+function New-Dict { return [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal) }
+function File-CopyChecked([string]$From, [string]$To, [string]$Expected) {
+    [IO.File]::Copy($From, $To, $false)
+    if ((Sha $To) -cne $Expected) { Stop-Sync "file changed during snapshot/copy: $From" }
+}
+function Replace-Atomic([string]$Temp, [string]$Dest) {
+    if ([IO.Directory]::Exists($Dest)) { Stop-Sync "destination became a directory: $Dest" }
+    if ([IO.File]::Exists($Dest)) {
+        Assert-NotLink $Dest
+        [IO.File]::Replace($Temp, $Dest, $null)
+    } else {
+        [IO.File]::Move($Temp, $Dest)
+    }
+}
+function Save-State {
+    if ($script:DryRun) { return }
+    if (-not [IO.Directory]::Exists($script:Root)) { [IO.Directory]::CreateDirectory($script:Root) | Out-Null }
+    $statePath = Rel-Path ([string]$Config.STATE_FILE)
+    $tmp = [IO.Path]::Combine($script:Root, '.telmi-state-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $obj = @{files = @{}}
+        foreach ($rel in $script:State.Keys) { $obj.files[$rel] = $script:State[$rel] }
+        $json = $obj | ConvertTo-Json -Depth 10
+        [IO.File]::WriteAllText($tmp, ($json + "`n"), (New-Object Text.UTF8Encoding($false)))
+        Replace-Atomic $tmp $statePath
+    } finally { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } }
+}
+function State-Set([string]$Rel, [string]$RemoteSha, [string]$LocalSha) {
+    $script:State[$Rel] = @{remote_sha256=$RemoteSha; local_sha256=$LocalSha}
+    Save-State
+}
+function Load-State {
+    $script:State = New-Dict
+    $path = Rel-Path ([string]$Config.STATE_FILE)
+    if (-not [IO.File]::Exists($path)) {
+        if ([IO.Directory]::Exists($path)) { Stop-Sync "state path is a directory: $path" }
+        return
+    }
+    Assert-NotLink $path
+    $raw = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop
+    $files = Prop $raw 'files'
+    if ($null -eq $files -or $files -isnot [pscustomobject]) { Stop-Sync 'state JSON must contain a files object' }
+    foreach ($p in $files.PSObject.Properties) {
+        $rel = [string]$p.Name
+        foreach ($part in $rel.Split('/')) { $null = Check-Name $part 'state path' }
+        $entry = $p.Value
+        $rsha = Prop $entry 'remote_sha256'; $lsha = Prop $entry 'local_sha256'
+        if (-not (Is-Sha $rsha) -or -not (Is-Sha $lsha)) { Stop-Sync "corrupted state hashes for $rel" }
+        $script:State.Add($rel, @{remote_sha256=$rsha.ToLowerInvariant();local_sha256=$lsha.ToLowerInvariant()})
+    }
+}
+
+# --- HTTP (native .NET HttpClient) --------------------------------------------
+Add-Type -AssemblyName System.Net.Http
+$script:Http = $null
+function Api-Url([string]$Action, [hashtable]$Fields) {
+    $query = @('action=' + [uri]::EscapeDataString($Action))
+    foreach ($key in @($Fields.Keys | Sort-Object)) {
+        $query += [uri]::EscapeDataString($key) + '=' + [uri]::EscapeDataString([string]$Fields[$key])
+    }
+    return $script:BaseUrl + '/api/ghost/v2/files.php?' + ($query -join '&')
+}
+function Api-Call {
+    param(
+        [string]$Method, [string]$Action,
+        [hashtable]$Query = @{}, $Body = $null,
+        [string]$UploadPath = '', [string]$UploadName = '', [hashtable]$Fields = @{},
+        [string]$DownloadTo = '', [switch]$RetryGet
+    )
+    $url = Api-Url $Action $Query
+    $limit = if ($Method -eq 'GET' -and $RetryGet) { $script:RetryCount } else { 1 }
+    for ($attempt = 1; $attempt -le $limit; $attempt++) {
+        $req = $null; $resp = $null; $cts = $null; $uploadStream = $null
+        $status = 0; $errorText = ''; $transportFailed = $false
+        try {
+            $req = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::new($Method), $url)
+            $req.Headers.Authorization = [Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $script:Jwt)
+            $req.Headers.Accept.Add([Net.Http.Headers.MediaTypeWithQualityHeaderValue]::new('application/json'))
+            if ($Method -eq 'POST' -and $UploadPath) {
+                $multipart = [Net.Http.MultipartFormDataContent]::new()
+                foreach ($key in @($Fields.Keys)) {
+                    $multipart.Add([Net.Http.StringContent]::new([string]$Fields[$key], [Text.Encoding]::UTF8), $key)
+                }
+                $uploadStream = [IO.File]::Open($UploadPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+                $content = [Net.Http.StreamContent]::new($uploadStream)
+                $content.Headers.ContentType = [Net.Http.Headers.MediaTypeHeaderValue]::new('application/octet-stream')
+                $multipart.Add($content, 'file', $UploadName)
+                $req.Content = $multipart
+            } elseif ($Method -eq 'POST') {
+                $json = $Body | ConvertTo-Json -Depth 10 -Compress
+                $req.Content = [Net.Http.StringContent]::new($json, [Text.Encoding]::UTF8, 'application/json')
+            }
+            $seconds = if ($DownloadTo -or $UploadPath) { $script:TransferTimeout } else { $script:ReadTimeout }
+            $cts = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($seconds))
+            $resp = $script:Http.SendAsync($req, [Net.Http.HttpCompletionOption]::ResponseHeadersRead, $cts.Token).GetAwaiter().GetResult()
+            $status = [int]$resp.StatusCode
+            if ($script:VerboseMode) { Log "HTTP $Method $url -> $status (attempt $attempt/$limit)" }
+            if ($status -ge 200 -and $status -lt 300) {
+                if ($DownloadTo) {
+                    $inputStream = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+                    $outputStream = [IO.File]::Open($DownloadTo, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                    try { $inputStream.CopyToAsync($outputStream, 1048576, $cts.Token).GetAwaiter().GetResult(); $outputStream.Flush($true) }
+                    finally { $outputStream.Dispose(); $inputStream.Dispose() }
+                    return $null
+                }
+                $raw = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                try { $obj = $raw | ConvertFrom-Json -ErrorAction Stop }
+                catch { Stop-Sync "API $Action invalid JSON at HTTP $status" }
+                if ($null -eq $obj -or (Prop $obj 'ok') -cne $true) {
+                    $err = Prop $obj 'error'; if (-not $err) { $err = Prop $obj 'message' }
+                    Stop-Sync "API $Action returned HTTP $status without ok:true: $err"
+                }
+                $apiStatus = Prop $obj 'status'
+                if ($apiStatus -is [string] -and $apiStatus.ToLowerInvariant() -in @('error','failed')) {
+                    Stop-Sync "API $Action returned application status $apiStatus"
+                }
+                return $obj
+            }
+            $errorText = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            try {
+                $errObj = $errorText | ConvertFrom-Json -ErrorAction Stop
+                $errField = Prop $errObj 'error'; if (-not $errField) { $errField = Prop $errObj 'message' }
+                if (-not $errField) { $errField = Prop (Prop $errObj 'data') 'error' }
+                if ($errField) { $errorText = [string]$errField }
+            } catch {}
+            if ($errorText.Length -gt 240) { $errorText = $errorText.Substring(0, 240) }
+        } catch {
+            # Do not retry programming, JSON, local I/O, or application validation errors.
+            # Only transport/timeout errors on GET can be retried.
+            $inner = $_.Exception
+            while ($null -ne $inner.InnerException) { $inner = $inner.InnerException }
+            if ($inner -isnot [Net.Http.HttpRequestException] -and
+                $inner -isnot [OperationCanceledException] -and
+                $inner -isnot [Threading.Tasks.TaskCanceledException]) { throw }
+            $transportFailed = $true
+            $errorText = $inner.Message
+            if ($errorText.Length -gt 240) { $errorText = $errorText.Substring(0, 240) }
+        } finally {
+            if ($null -ne $resp) { $resp.Dispose() }
+            if ($null -ne $req) { $req.Dispose() }
+            if ($null -ne $cts) { $cts.Dispose() }
+            if ($null -ne $uploadStream) { $uploadStream.Dispose() }
+        }
+        if ($status -eq 409) { Stop-Sync "CONFLICT HTTP 409 during $Action; server wins; $errorText" }
+        $retryable = ($Method -eq 'GET' -and $RetryGet -and $attempt -lt $limit -and
+            ($transportFailed -or $status -eq 408 -or $status -eq 429 -or ($status -ge 500 -and $status -lt 600)))
+        if ($retryable) {
+            if ($DownloadTo -and [IO.File]::Exists($DownloadTo)) { [IO.File]::Delete($DownloadTo) }
+            Log "WARN GET $Action HTTP $status failed; retrying ($attempt/$limit): $errorText"
+            Start-Sleep -Seconds $script:RetryDelay
+            continue
+        }
+        Stop-Sync "HTTP $Method $Action failed status=$status : $errorText"
+    }
+}
+function Api-Data($Reply, [string]$Action) {
+    $data = Prop $Reply 'data'; if ($null -eq $data) { $data = $Reply }
+    if ($data -isnot [pscustomobject]) { Stop-Sync "API $Action response has no data object" }
+    return $data
+}
+function Api-List([string]$FolderId) {
+    $q = @{space_id=$script:SpaceId;limit=$script:ListLimit}
+    if ($FolderId) { $q.folder_id = $FolderId }
+    $d = Api-Data (Api-Call -Method 'GET' -Action 'list' -Query $q -RetryGet) 'list'
+    $files = Prop $d 'files'; $folders = Prop $d 'folders'
+    if ($files -isnot [array] -or $folders -isnot [array]) {
+        Stop-Sync "API list folder '$FolderId' missing files[] or folders[]"
+    }
+    if ($files.Count -ge $script:ListLimit -or $folders.Count -ge $script:ListLimit) {
+        Stop-Sync "API list folder '$FolderId' hits non-paginated limit=$($script:ListLimit) ($($files.Count) files / $($folders.Count) folders); inventory incomplete"
+    }
+    return @{files=$files; folders=$folders}
+}
+function Check-ListingParent($Parent, [string]$Expected) {
+    if ($null -eq $Parent -or $Parent -ceq '' -or $Parent -ceq $Expected) { return }
+    if (-not $Expected -and $Parent -ceq $script:SpaceId) { return }
+    Stop-Sync "API returned mismatched folder_id/parent_id: '$Parent' (expected '$Expected')"
+}
+function Read-RemoteTree {
+    $script:Remote = New-Dict
+    $script:Folders = New-Dict
+    $script:Folders.Add('', '')
+    $seenPaths = New-Dict; $seenIds = New-Dict; $fileIds = New-Dict
+    $seenPaths.Add((Canon ([string]$Config.STATE_FILE)), '[reserved state file]')
+    $queue = [Collections.Generic.Queue[object]]::new()
+    $queue.Enqueue(@{rel=''; id=''; depth=0})
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
+        if ($current.depth -gt $script:MaxDepth) { Stop-Sync "remote folder depth exceeded: $($current.rel)" }
+        if ($seenIds.ContainsKey('D:' + $current.id)) { Stop-Sync "repeated remote folder ID: $($current.id)" }
+        $seenIds.Add('D:' + $current.id, $true)
+        $listing = Api-List $current.id
+        $script:Counts.folders++
+        if ($script:VerboseMode) { Log "LIST $(if ($current.rel) { $current.rel } else { '/' }): $($listing.folders.Count) folders, $($listing.files.Count) files" }
+        foreach ($f in $listing.folders) {
+            $name = Check-Name (Prop $f 'name') 'remote folder'
+            $fid = Prop $f 'folder_id'; if ($fid -isnot [string] -or -not $fid) { Stop-Sync "API folder '$name' missing ID" }
+            Check-ListingParent (Prop $f 'parent_id') $current.id
+            $rel = if ($current.rel) { $current.rel + '/' + $name } else { $name }
+            $canon = Canon $rel
+            if ($seenPaths.ContainsKey($canon)) { Stop-Sync "remote case/Unicode/name collision: '$rel'" }
+            if ($seenIds.ContainsKey('D:' + $fid) -or $script:Folders.Values -ccontains $fid) { Stop-Sync "duplicate folder ID '$fid'" }
+            $seenPaths.Add($canon, $rel)
+            $script:Folders.Add($rel, $fid)
+            $queue.Enqueue(@{rel=$rel;id=$fid;depth=([int]$current.depth + 1)})
+        }
+        foreach ($f in $listing.files) {
+            $name = Check-Name (Prop $f 'name') 'remote file'
+            $fid = Prop $f 'file_id'; $sha = Prop $f 'sha256'
+            if ($fid -isnot [string] -or -not $fid -or $fileIds.ContainsKey($fid)) { Stop-Sync "API file '$name' has missing/duplicate file_id" }
+            if (-not (Is-Sha $sha)) { Stop-Sync "API file '$name' has missing/invalid sha256" }
+            Check-ListingParent (Prop $f 'folder_id') $current.id
+            $rel = if ($current.rel) { $current.rel + '/' + $name } else { $name }
+            $canon = Canon $rel
+            if ($seenPaths.ContainsKey($canon)) { Stop-Sync "remote case/Unicode/name collision: '$rel'" }
+            $seenPaths.Add($canon, $rel); $fileIds.Add($fid, $true)
+            $script:Remote.Add($rel, @{id=$fid;sha=$sha.ToLowerInvariant();folder=$current.id})
+        }
+    }
+    if ($script:Remote.Count -eq 0) { Stop-Sync 'remote inventory contains ZERO FILES; HARD STOP (no changes)' }
+    Log "Remote inventory validated: $($script:Remote.Count) files, $($script:Counts.folders) folders"
+}
+function Read-LocalTree {
+    $local = New-Dict; $pathMap = New-Dict
+    if (-not [IO.Directory]::Exists($script:Root)) { return $local }
+    Assert-NotLink $script:Root
+    $queue = [Collections.Generic.Queue[string]]::new(); $queue.Enqueue($script:Root)
+    while ($queue.Count -gt 0) {
+        $base = $queue.Dequeue()
+        foreach ($entry in (Get-ChildItem -LiteralPath $base -Force -ErrorAction Stop)) {
+            $name = Check-Name $entry.Name 'local file/folder'
+            $full = $entry.FullName
+            if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Stop-Sync "local junction/symlink refused: $full" }
+            $rel = $full.Substring($script:Root.TrimEnd('\').Length + 1).Replace('\', '/')
+            $canon = Canon $rel
+            if ($pathMap.ContainsKey($canon)) { Stop-Sync "local case/Unicode collision at '$rel'" }
+            $pathMap.Add($canon, $rel)
+            if ($entry.PSIsContainer) { $queue.Enqueue($full); continue }
+            if (-not ($entry -is [IO.FileInfo])) { Stop-Sync "unsupported local filesystem entry: $full" }
+            if (($rel -ceq [string]$Config.STATE_FILE) -or $name -ceq '.DS_Store' -or
+                $name.StartsWith('.telmi-', [StringComparison]::OrdinalIgnoreCase) -or
+                $name.IndexOf('.conflict-', [StringComparison]::OrdinalIgnoreCase) -ge 0) { continue }
+            $local.Add($rel, (Sha $full))
+        }
+    }
+    return $local
+}
+function Plan-Sync {
+    Load-State
+    Read-RemoteTree
+    $local = Read-LocalTree
+    $remoteNames = New-Dict
+    foreach ($name in @($script:Remote.Keys) + @($script:Folders.Keys)) {
+        $remoteNames[(Canon $name)] = $name
+    }
+    foreach ($rel in $local.Keys) {
+        $c = Canon $rel
+        if ($remoteNames.ContainsKey($c) -and $remoteNames[$c] -cne $rel) {
+            Stop-Sync "local/remote paths differ in case or Unicode: '$rel' vs '$($remoteNames[$c])'"
+        }
+    }
+    $script:Actions = New-Object System.Collections.ArrayList
+    $script:RemoteAbsent = New-Object System.Collections.ArrayList
+    foreach ($rel in @($script:Remote.Keys | Sort-Object)) {
+        $r = $script:Remote[$rel]
+        $dest = Rel-Path $rel
+        if (-not $local.ContainsKey($rel)) {
+            if ([IO.Directory]::Exists($dest)) { Stop-Sync "remote file conflicts with local folder: $rel" }
+            if ($script:Mode -ne 'push') { $null = $script:Actions.Add(@{op='download';rel=$rel;baseline=$null}) }
+            else { $script:Counts.skipped++ }
+            continue
+        }
+        $lsha = [string]$local[$rel]; $rsha = [string]$r.sha
+        $st = $null; if ($script:State.ContainsKey($rel)) { $st = $script:State[$rel] }
+        if ($lsha -ceq $rsha) {
+            if ($null -eq $st -or $st.remote_sha256 -cne $rsha -or $st.local_sha256 -cne $lsha) {
+                $null = $script:Actions.Add(@{op='adopt';rel=$rel;baseline=$lsha})
+            }
+            continue
+        }
+        $rc = ($null -eq $st -or $rsha -cne $st.remote_sha256)
+        $lc = ($null -eq $st -or $lsha -cne $st.local_sha256)
+        if ($rc -and $lc) {
+            if ($script:Mode -ne 'push') { $null = $script:Actions.Add(@{op='conflict';rel=$rel;baseline=$lsha}) }
+            else { $script:Counts.skipped++ }
+        } elseif ($rc) {
+            if ($script:Mode -ne 'push') { $null = $script:Actions.Add(@{op='download';rel=$rel;baseline=$lsha}) }
+            else { $script:Counts.skipped++ }
+        } elseif ($lc) {
+            if ($script:Mode -ne 'pull') { $null = $script:Actions.Add(@{op='replace';rel=$rel;baseline=$lsha}) }
+            else { $script:Counts.skipped++ }
+        } else { Stop-Sync "inconsistent state for $rel" }
+    }
+    foreach ($rel in @($local.Keys | Sort-Object)) {
+        if ($script:Remote.ContainsKey($rel)) { continue }
+        if ($script:State.ContainsKey($rel)) {
+            $null = $script:RemoteAbsent.Add($rel); $script:Counts.skipped++; continue
+        }
+        if ($remoteNames.ContainsKey((Canon $rel))) { Stop-Sync "local file collides with remote path: '$rel'" }
+        if ($script:Mode -ne 'pull') { $null = $script:Actions.Add(@{op='upload';rel=$rel;baseline=$local[$rel]}) }
+        else { $script:Counts.skipped++ }
+    }
+    foreach ($dir in $script:Folders.Keys) {
+        if ($dir -and $local.ContainsKey($dir)) { Stop-Sync "local file blocks remote folder: $dir" }
+        $p = if ($dir) { Rel-Path $dir } else { $script:Root }
+        if ([IO.File]::Exists($p)) { Stop-Sync "remote folder path is a local file: $dir" }
+    }
+    Log "Plan: $($script:Actions.Count) actions, $($script:RemoteAbsent.Count) previously-synced remote deletions"
+}
+function Remote-Match([string]$Rel, $Expected) {
+    $parent = Parent-Rel $Rel
+    if (-not $script:Folders.ContainsKey($parent)) { Stop-Sync "unknown remote parent: $Rel" }
+    $lst = Api-List ([string]$script:Folders[$parent])
+    $name = Leaf-Rel $Rel
+    $matches = @($lst.files | Where-Object { $n = Prop $_ 'name'; $n -is [string] -and (Canon $n) -ceq (Canon $name) })
+    if ($matches.Count -gt 1) { Stop-Sync "duplicate remote filename: $Rel" }
+    if ($null -eq $Expected) {
+        if ($matches.Count -gt 0) { Stop-Sync "remote file appeared after inventory, server wins: $Rel" }
+    } else {
+        $match = if ($matches.Count -eq 1) { $matches[0] } else { $null }
+        if ($null -eq $match -or (Prop $match 'name') -cne $name -or
+            (Prop $match 'file_id') -cne $Expected.id -or
+            (Prop $match 'sha256').ToLowerInvariant() -cne $Expected.sha) { Stop-Sync "remote changed after inventory, server wins: $Rel" }
+    }
+}
+function Remote-EnsureFolder([string]$Rel) {
+    if ($script:Folders.ContainsKey($Rel)) { return [string]$script:Folders[$Rel] }
+    $parent = Parent-Rel $Rel; $name = Leaf-Rel $Rel
+    $pid = Remote-EnsureFolder $parent
+    $lst = Api-List $pid
+    $matches = @($lst.folders | Where-Object { $n = Prop $_ 'name'; $n -is [string] -and (Canon $n) -ceq (Canon $name) })
+    if ($matches.Count) { Stop-Sync "remote folder appeared since inventory: $Rel" }
+    $body = @{space_id=$script:SpaceId;name=$name}
+    if ($pid) { $body.parent_id = $pid }
+    $d = Api-Data (Api-Call -Method 'POST' -Action 'folder_create' -Body $body) 'folder_create'
+    $fid = Prop $d 'folder_id'
+    if ($fid -isnot [string] -or -not $fid) { Stop-Sync "folder_create missing folder_id for $Rel" }
+    $script:Folders.Add($Rel, $fid)
+    Log "MKDIR-REMOTE $Rel/"
+    return $fid
+}
+function Make-LocalFolders {
+    foreach ($rel in @($script:Folders.Keys | Where-Object { $_ } | Sort-Object { ($_.ToCharArray() | Where-Object { $_ -eq '/' }).Count }, { $_ })) {
+        $path = Rel-Path $rel
+        if ([IO.Directory]::Exists($path)) { continue }
+        if ($script:DryRun) { Log "MKDIR $rel/ (dry-run)"; continue }
+        [IO.Directory]::CreateDirectory($path) | Out-Null
+        if ($script:VerboseMode) { Log "MKDIR $rel/" }
+    }
+}
+function Conflict-Copy([string]$Rel, [string]$Expected) {
+    $src = Rel-Path $Rel
+    if (-not [IO.File]::Exists($src)) { return }
+    $sidecar = $src + '.conflict-' + (Get-Date -Format 'yyyyMMddTHHmmss') + '-' + $PID + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8)
+    File-CopyChecked $src $sidecar $Expected
+    Log "CONFLICT-SERVER-WINS $Rel (local copy retained as $(Split-Path $sidecar -Leaf))"
+    $script:Counts.conflicts++
+}
+function Download-Action([string]$Rel, [bool]$Conflict, $PlannedSha) {
+    if ($script:DryRun) {
+        Log "$(if ($Conflict) { 'CONFLICT-SERVER-WINS' } else { 'DOWNLOAD' }) $Rel (dry-run)"
+        $script:Counts.downloads++; if ($Conflict) { $script:Counts.conflicts++ }; return
+    }
+    $record = $script:Remote[$Rel]; $dest = Rel-Path $Rel
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($dest)) | Out-Null
+    $tmp = [IO.Path]::Combine([IO.Path]::GetDirectoryName($dest), '.telmi-download-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        Api-Call -Method 'GET' -Action 'content' -Query @{file_id=$record.id} -DownloadTo $tmp -RetryGet
+        $got = Sha $tmp
+        if ($got -cne $record.sha) { Stop-Sync "download SHA-256 mismatch: $Rel" }
+        Remote-Match $Rel $record
+        $nowSha = $null
+        if ([IO.File]::Exists($dest)) { $nowSha = Sha $dest }
+        if ($null -ne $nowSha -and $nowSha -cne $got -and ($Conflict -or $nowSha -cne $PlannedSha)) {
+            Conflict-Copy $Rel $nowSha
+        }
+        if ([IO.File]::Exists($dest)) { Assert-NotLink $dest }
+        Replace-Atomic $tmp $dest
+        State-Set $Rel $got $got
+        Log "DOWNLOAD $Rel"; $script:Counts.downloads++
+    } finally { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } }
+}
+function Upload-Action([string]$Rel, [string]$PlannedSha, [bool]$NewFile) {
+    $label = if ($NewFile) { 'UPLOAD' } else { 'REPLACE' }
+    if ($script:DryRun) { Log "$label $Rel (dry-run)"; $script:Counts.uploads++; return }
+    $src = Rel-Path $Rel
+    if (-not [IO.File]::Exists($src) -or (Sha $src) -cne $PlannedSha) { Stop-Sync "local file changed since plan: $Rel" }
+    $parent = Parent-Rel $Rel; $name = Leaf-Rel $Rel
+    $folderId = Remote-EnsureFolder $parent
+    $record = $null; if (-not $NewFile) { $record = $script:Remote[$Rel] }
+    Remote-Match $Rel $record
+    $snap = [IO.Path]::Combine($script:WorkDir, 'upload-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        File-CopyChecked $src $snap $PlannedSha
+        $fields = @{}
+        if ($NewFile) {
+            $fields.space_id = $script:SpaceId
+            if ($folderId) { $fields.folder_id = $folderId }
+        } else {
+            $fields.file_id = $record.id
+            $fields.expected_sha256 = $record.sha
+        }
+        $action = if ($NewFile) { 'upload' } else { 'file_replace' }
+        $d = Api-Data (Api-Call -Method 'POST' -Action $action -UploadPath $snap -UploadName $name -Fields $fields) $action
+        $reported = Prop $d 'sha256'
+        if ($null -ne $reported -and (-not (Is-Sha $reported) -or $reported.ToLowerInvariant() -cne $PlannedSha)) {
+            Stop-Sync "API $action reported wrong SHA-256 for $Rel"
+        }
+        $returnedId = Prop $d 'file_id'
+        if (-not $NewFile -and $null -ne $returnedId -and $returnedId -cne $record.id) { Stop-Sync "file_replace unexpectedly changed file_id for $Rel" }
+        $lst = Api-List $folderId
+        $matches = @($lst.files | Where-Object { $n = Prop $_ 'name'; $n -is [string] -and (Canon $n) -ceq (Canon $name) })
+        if ($matches.Count -ne 1) { Stop-Sync "post-$action verification found $($matches.Count) matching files for $Rel" }
+        $f = $matches[0]; $newSha = Prop $f 'sha256'; $newId = Prop $f 'file_id'
+        if ((Prop $f 'name') -cne $name -or $newId -isnot [string] -or -not $newId) { Stop-Sync "post-$action returned unexpected name or missing file_id for $Rel" }
+        if ((-not (Is-Sha $newSha)) -or $newSha.ToLowerInvariant() -cne $PlannedSha) { Stop-Sync "post-$action checksum mismatch for $Rel" }
+        if (-not $NewFile -and $newId -cne $record.id) { Stop-Sync "post-file_replace ID changed for $Rel" }
+        $script:Remote[$Rel] = @{id=$newId;sha=$PlannedSha;folder=$folderId}
+        State-Set $Rel $PlannedSha $PlannedSha
+        Log "$label $Rel"; $script:Counts.uploads++
+    } finally { if ([IO.File]::Exists($snap)) { [IO.File]::Delete($snap) } }
+}
+function Run-Sync {
+    Plan-Sync
+    foreach ($rel in $script:RemoteAbsent) { Log "SKIP $rel (deleted remotely; local copy retained, NOT uploaded)" }
+    Make-LocalFolders
+    foreach ($act in $script:Actions) {
+        switch ($act.op) {
+            'adopt' {
+                if ($script:DryRun) { Log "ADOPT $($act.rel) (dry-run)" }
+                else {
+                    $rsha = $script:Remote[$act.rel].sha
+                    if ((Sha (Rel-Path $act.rel)) -cne $rsha) { Stop-Sync "local changed before ADOPT: $($act.rel)" }
+                    State-Set $act.rel $rsha $rsha
+                }
+            }
+            'download' { Download-Action $act.rel $false $act.baseline }
+            'conflict' { Download-Action $act.rel $true $act.baseline }
+            'upload' { Upload-Action $act.rel ([string]$act.baseline) $true }
+            'replace' { Upload-Action $act.rel ([string]$act.baseline) $false }
+            default { Stop-Sync "unknown action: $($act.op)" }
+        }
+    }
+    Log "telmi-files-sync done: folders=$($script:Counts.folders) downloads=$($script:Counts.downloads) uploads=$($script:Counts.uploads) conflicts=$($script:Counts.conflicts) skipped=$($script:Counts.skipped) errors=0"
+}
+
+# --- MAIN --------------------------------------------------------------------
+$script:LogPath = $null
+$script:Http = $null
+$script:LockStream = $null
+$script:WorkDir = $null
+$exitCode = 0
+try {
+    $script:DryRun = $false; $script:Mode = 'both'; $script:VerboseMode = $false
+    $pull = $false; $push = $false
+    foreach ($arg in $args) {
+        switch ([string]$arg) {
+            '--dry-run' { $script:DryRun = $true }
+            '--pull' { $pull = $true }
+            '--push' { $push = $true }
+            '--verbose' { $script:VerboseMode = $true }
+            '-v' { $script:VerboseMode = $true }
+            '--help' { Write-Host 'Usage: .\telmi-files-sync-windows.ps1 [--dry-run] [--pull] [--push] [--verbose]'; exit 0 }
+            '-h' { Write-Host 'Usage: .\telmi-files-sync-windows.ps1 [--dry-run] [--pull] [--push] [--verbose]'; exit 0 }
+            default { Stop-Sync "Unknown option: $arg" }
+        }
+    }
+    if ($pull -and $push) { Stop-Sync '--pull and --push are mutually exclusive' }
+    if ($pull) { $script:Mode = 'pull' }; if ($push) { $script:Mode = 'push' }
+    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA) -or [string]::IsNullOrWhiteSpace($env:USERPROFILE)) { Stop-Sync 'Windows user profile unavailable' }
+    # Establish the persistent log before validating credentials/settings, so
+    # even configuration errors produce a logged hard stop.
+    [IO.Directory]::CreateDirectory([string]$Config.LOG_DIR) | Out-Null
+    $script:LogPath = [IO.Path]::Combine([string]$Config.LOG_DIR, 'telmi-files-sync.log')
+    $script:Jwt = [string]$Config.TELMI_GHOST_JWT
+    $script:SpaceId = [string]$Config.TELMI_SPACE_ID
+    $script:BaseUrl = ([string]$Config.TELMI_BASE_URL).TrimEnd('/')
+    if ($script:Jwt -eq 'PASTE_YOUR_GHOST_JWT_HERE' -or [string]::IsNullOrWhiteSpace($script:Jwt)) { Stop-Sync 'TELMI_GHOST_JWT not configured' }
+    if ($script:SpaceId -eq 'PASTE_YOUR_SPACE_ID_HERE' -or $script:SpaceId -cnotmatch '^[A-Za-z0-9_-]{1,128}$') { Stop-Sync 'TELMI_SPACE_ID missing/invalid' }
+    $uri = $null
+    if (-not [uri]::TryCreate($script:BaseUrl, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -cne 'https' -or
+        $uri.UserInfo -or $uri.Query -or $uri.Fragment -or $uri.AbsolutePath -ne '/') { Stop-Sync 'TELMI_BASE_URL must be an HTTPS origin (no path/query/credentials)' }
+    $null = Check-Name ([string]$Config.STATE_FILE) 'STATE_FILE'
+    $script:Root = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables([string]$Config.SYNC_DIR)).TrimEnd('\')
+    if ($script:Root.Length -lt 4) { Stop-Sync 'unsafe sync root directory' }
+    if ([IO.File]::Exists($script:Root)) { Stop-Sync 'SYNC_DIR is a file' }
+    if ([IO.Directory]::Exists($script:Root)) { Assert-NotLink $script:Root }
+    $script:ListLimit = Parse-Int 'LIST_PAGE_SIZE' 1 500
+    $script:MaxDepth = Parse-Int 'MAX_FOLDER_DEPTH' 1 128
+    $script:RetryCount = Parse-Int 'HTTP_RETRIES' 1 20
+    $script:RetryDelay = Parse-Int 'HTTP_RETRY_SLEEP' 0 600
+    $script:ReadTimeout = Parse-Int 'HTTP_READ_TIMEOUT' 1 86400
+    $script:TransferTimeout = Parse-Int 'HTTP_TRANSFER_TIMEOUT' 1 86400
+    $script:Counts = @{folders=0;downloads=0;uploads=0;conflicts=0;skipped=0}
+    Log "telmi-files-sync start mode=$($script:Mode) dry_run=$([int]$script:DryRun) space=$($script:SpaceId)"
+    # Exclusive OS file lock: held open with FileShare.None; automatically
+    # released on process exit/crash, no unsafe stale-lock deletion or PID reuse.
+    [IO.Directory]::CreateDirectory([string]$Config.LOCK_DIR) | Out-Null
+    $lockInput = $script:Root.ToUpperInvariant()
+    $lockBytes = [Text.Encoding]::UTF8.GetBytes($lockInput)
+    $hashAlgo = [Security.Cryptography.SHA256]::Create()
+    try { $lockName = ([BitConverter]::ToString($hashAlgo.ComputeHash($lockBytes))).Replace('-', '').Substring(0,24) }
+    finally { $hashAlgo.Dispose() }
+    $lockPath = [IO.Path]::Combine([string]$Config.LOCK_DIR, "space-$lockName.lock")
+    try { $script:LockStream = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
+    catch [IO.IOException] { Stop-Sync "another sync is running or lock unavailable ($lockPath)" }
+    $script:WorkDir = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'telmi-files-sync-' + [Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($script:WorkDir) | Out-Null
+    $handler = [Net.Http.HttpClientHandler]::new()
+    $handler.AllowAutoRedirect = $false  # don't disclose bearer JWT via redirects
+    $script:Http = [Net.Http.HttpClient]::new($handler)
+    $script:Http.Timeout = [Threading.Timeout]::InfiniteTimeSpan  # per-request cancellation tokens
+    Run-Sync
+} catch {
+    $exitCode = 1
+    $message = $_.Exception.Message
+    try { Log "ERROR HARD STOP: $message" }
+    catch { [Console]::Error.WriteLine("ERROR HARD STOP: $message (logging also failed)") }
+} finally {
+    if ($null -ne $script:Http) { $script:Http.Dispose() }
+    if ($null -ne $script:LockStream) { $script:LockStream.Dispose() }
+    if ($script:WorkDir -and [IO.Directory]::Exists($script:WorkDir)) {
+        try { [IO.Directory]::Delete($script:WorkDir, $true) }
+        catch { [Console]::Error.WriteLine("WARN could not remove temporary work folder: $($script:WorkDir)") }
+    }
+}
+exit $exitCode

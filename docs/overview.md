@@ -35,12 +35,15 @@ The current shipped modules are:
 - one RAG prep utility tool for PHP in `tools/rag-prep/php/`
 - one standalone Ghost Eval utility tool for PHP in `tools/ghost-eval/php/`
 - one Nextcloud Talk meeting-link utility tool for PHP in `tools/nextcloud-talk-connect/php/`
+- one no-auth Files Sync guide with local macOS and Windows clients in `tools/files-sync/php/`
 
 The repository is shaped as a connector framework, and this is what is public today:
 
 - one Telegram PHP connector module in `connectors/telegram/php/`
 - one RAG prep PHP tool in `tools/rag-prep/php/`
+- one standalone Ghost Eval PHP tool in `tools/ghost-eval/php/`
 - one Nextcloud Talk Connect PHP tool in `tools/nextcloud-talk-connect/php/`
+- one Files Sync guide module in `tools/files-sync/php/`
 - one private paired Telegram owner
 - Ghost chat submission through `POST /chat` in queued mode
 - Ghost chat history enabled in the request payload
@@ -51,6 +54,7 @@ The repository is shaped as a connector framework, and this is what is public to
 - protected maintenance actions through `maintenance.php`
 - TXT, PDF, and DOCX intake for Ghost-driven telmi OS artifact generation
 - group Files-based Ghost evaluation suites and Markdown reports
+- a guided Files-space sync walkthrough and downloadable local clients
 
 Core flows:
 
@@ -89,6 +93,8 @@ The Ghost Eval tool is another standalone utility flow:
 5. the tool uploads a dated Markdown report to the same group Files space
 
 The Files space is configured separately from chat memory. Challenge chats stay in the Ghost's personal conversation context; selected group IDs are sent as `active_groups` to add their memories when RAG is enabled.
+
+The Files Sync tool has a different deployment boundary: Hades serves its PHP guide page, while the chosen computer runs the downloaded client with its own Ghost JWT, Files-space ID, local directory, and schedule. The guide page has no sign-in or installer and never receives the JWT.
 
 ## Why Teleport AI Publishes This
 

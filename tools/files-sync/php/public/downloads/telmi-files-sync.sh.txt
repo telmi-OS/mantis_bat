@@ -1,0 +1,884 @@
+#!/bin/bash
+# telmi-files-sync.sh — fail-closed macOS <-> telmi OS Files sync (Ghost API v2).
+#
+# Usage (unchanged):
+#   ./telmi-files-sync.sh [--dry-run] [--pull] [--push] [--verbose]
+#   --pull / --push are mutually exclusive; no mode means both directions.
+#   --dry-run plans only; it never modifies the sync folder or server.
+#
+# Server wins if both sides changed (a timestamped local conflict copy is kept).
+# Updates use atomic file_replace (file_id + expected_sha256); never upload.
+# Remote deletions are NEVER re-uploaded. Local deletions are re-downloaded.
+# No deletes are propagated. An empty or incomplete remote file inventory aborts.
+# The public Files list API has NO cursor/offset/has_more; a listing that
+# reaches its independent folder/file limit is ambiguous and MUST abort.
+# Any HTTP/API/validation/transfer/state failure aborts with a nonzero exit code.
+#
+# Requirements: macOS bash 3.2+, python3, curl. No pip dependencies.
+# Install: chmod 700 telmi-files-sync.sh
+# Secret: export TELMI_GHOST_JWT='...' (or set it below). NEVER commit a JWT.
+# Cron logging: /path/telmi-files-sync.sh >> "$HOME/telmi-files-sync.log" 2>&1
+
+set -euo pipefail
+umask 077
+
+# -----------------------------------------------------------------------------
+# CONFIGURATION. Environment variables may override every setting below.
+# -----------------------------------------------------------------------------
+export TELMI_GHOST_JWT="${TELMI_GHOST_JWT:-PASTE_YOUR_GHOST_JWT_HERE}"
+export TELMI_BASE_URL="${TELMI_BASE_URL:-https://YOUR-TELMI-HOST.example}"
+export TELMI_SPACE_ID="${TELMI_SPACE_ID:-PASTE_YOUR_SPACE_ID_HERE}"
+export SYNC_DIR="${SYNC_DIR:-$HOME/TelmiSync/MySpace}"
+export STATE_FILE="${STATE_FILE:-.telmi-sync-state.json}"
+export LOCK_DIR="${LOCK_DIR:-$HOME/.telmi-files-sync.lock}"
+export LOCK_STALE_MINUTES="${LOCK_STALE_MINUTES:-360}"
+export HTTP_RETRIES="${HTTP_RETRIES:-3}"  # read-only GETs only
+export HTTP_RETRY_SLEEP="${HTTP_RETRY_SLEEP:-3}"
+export LIST_PAGE_SIZE="${LIST_PAGE_SIZE:-500}"
+export MAX_FOLDER_DEPTH="${MAX_FOLDER_DEPTH:-32}"
+export CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-15}"
+export CURL_READ_TIMEOUT="${CURL_READ_TIMEOUT:-120}"
+export CURL_TRANSFER_TIMEOUT="${CURL_TRANSFER_TIMEOUT:-3600}"
+
+command -v python3 >/dev/null 2>&1 || { echo 'ERROR python3 is required' >&2; exit 1; }
+command -v curl >/dev/null 2>&1 || { echo 'ERROR curl is required' >&2; exit 1; }
+
+# All changes, networking and state management happen in this single Python
+# process; a Bash/Python split formerly hid failures inside command substitutions.
+exec python3 - "$@" <<'PY'
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import unicodedata
+from urllib.parse import urlencode
+import uuid
+
+
+class SyncError(Exception):
+    pass
+
+
+def log(message):
+    now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    print(f"{now} {message}", file=sys.stderr, flush=True)
+
+
+def abort(message):
+    raise SyncError(message)
+
+
+def config_int(name, minimum=0):
+    try:
+        result = int(os.environ[name])
+    except (ValueError, KeyError):
+        abort(f"invalid configuration {name}")
+    if result < minimum:
+        abort(f"invalid configuration {name}: minimum is {minimum}")
+    return result
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def is_sha(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F]{64}", value) is not None
+
+
+def validate_name(name, label):
+    if (not isinstance(name, str) or not name or name in (".", "..")
+            or "/" in name or "\\" in name or "\x00" in name
+            or any(ord(c) < 32 or ord(c) == 127 for c in name)):
+        abort(f"unsafe {label} name: {name!r}")
+    return name
+
+
+def canonical_path(path):
+    return unicodedata.normalize("NFC", path).casefold()
+
+
+class OwnedLock:
+    """Don't remove another process's lock, even on early exit."""
+    def __init__(self, directory, stale_minutes):
+        self.path = Path(directory)
+        self.stale_minutes = stale_minutes
+        self.nonce = uuid.uuid4().hex
+        self.owned_inode = None
+
+    def __enter__(self):
+        # The safe default is NOT to steal a lock. Only a known-dead PID in an
+        # old lock can be recovered; an unknown owner requires manual attention.
+        for _ in range(2):
+            try:
+                self.path.mkdir(mode=0o700)
+                self.owned_inode = self.path.stat().st_ino
+                owner = {"pid": os.getpid(), "nonce": self.nonce,
+                         "created": time.time()}
+                with open(self.path / "owner.json", "x", encoding="utf-8") as f:
+                    json.dump(owner, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                return self
+            except FileExistsError:
+                if not self._recover_stale():
+                    abort(f"another sync holds lock {self.path}; aborting")
+            except OSError as exc:
+                # If mkdir succeeded but writing owner.json failed, don't
+                # strand an ownerless lock forever.
+                if self.owned_inode is not None:
+                    try:
+                        owner_file = self.path / "owner.json"
+                        if owner_file.exists():
+                            owner_file.unlink()
+                        self.path.rmdir()
+                    except OSError:
+                        pass
+                    self.owned_inode = None
+                abort(f"cannot acquire lock {self.path}: {exc}")
+        abort(f"cannot acquire lock {self.path} after stale-lock recovery")
+
+    def _recover_stale(self):
+        guard = Path(str(self.path) + ".recovery")
+        try:
+            guard.mkdir(mode=0o700)
+        except FileExistsError:
+            return False
+        try:
+            if self.path.is_symlink() or not self.path.is_dir():
+                return False
+            owner_path = self.path / "owner.json"
+            try:
+                with open(owner_path, encoding="utf-8") as f:
+                    owner = json.load(f)
+                pid = owner.get("pid")
+                created = owner.get("created")
+                if not isinstance(pid, int) or pid <= 0 or not isinstance(created, (int, float)):
+                    return False
+                if time.time() - created < self.stale_minutes * 60:
+                    return False
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    pass  # positively identified a dead process
+                except PermissionError:
+                    return False
+                else:
+                    return False  # live owner, regardless of lock age
+                inode_before = self.path.stat().st_ino
+                if self.path.stat().st_ino != inode_before:
+                    return False
+                # Only the owner's known metadata is removed; unknown contents
+                # make recovery refuse, rather than deleting someone else's data.
+                if set(os.listdir(self.path)) != {"owner.json"}:
+                    return False
+                os.unlink(owner_path)
+                os.rmdir(self.path)
+                log(f"WARN recovered abandoned lock {self.path} (dead PID {pid})")
+                return True
+            except (OSError, ValueError, TypeError):
+                return False
+        finally:
+            try:
+                guard.rmdir()
+            except OSError:
+                pass
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.owned_inode is None:
+            return
+        try:
+            if self.path.is_symlink() or self.path.stat().st_ino != self.owned_inode:
+                log("WARN lock changed ownership; not removing it")
+                return
+            with open(self.path / "owner.json", encoding="utf-8") as f:
+                owner = json.load(f)
+            if owner.get("nonce") != self.nonce or owner.get("pid") != os.getpid():
+                log("WARN lock token changed; not removing it")
+                return
+            os.unlink(self.path / "owner.json")
+            os.rmdir(self.path)
+        except OSError as e:
+            log(f"WARN could not release owned lock: {e}")
+
+
+class Client:
+    def __init__(self, base, space_id, jwt, work, retries, retry_sleep,
+                 connect_timeout, read_timeout, transfer_timeout, verbose):
+        self.base = base.rstrip("/")
+        self.space_id = space_id
+        self.jwt = jwt
+        self.work = Path(work)
+        self.retries = retries
+        self.retry_sleep = retry_sleep
+        self.connect_timeout = connect_timeout
+        self.read_timeout = read_timeout
+        self.transfer_timeout = transfer_timeout
+        self.verbose = verbose
+        self.serial = 0
+
+    def endpoint(self, **params):
+        return self.base + "/api/ghost/v2/files.php?" + urlencode(params)
+
+    def request(self, method, url, *, body=None, source=None, filename=None,
+                multipart_fields=None, binary=False, retry=False, timeout=None):
+        self.serial += 1
+        out = self.work / f"http-{self.serial}.body"
+        attempts = self.retries if retry else 1
+        for attempt in range(1, attempts + 1):
+            # Never put the JWT in a subprocess shell command or log entry.
+            cmd = ["curl", "--silent", "--show-error", "--proto", "=https",
+                   "--connect-timeout", str(self.connect_timeout),
+                   "--max-time", str(timeout or self.read_timeout),
+                   "--output", str(out), "--write-out", "%{http_code}",
+                   "--header", "Authorization: Bearer " + self.jwt,
+                   "--header", "Accept: application/json"]
+            if method == "POST":
+                cmd += ["--request", "POST"]
+            if body is not None:
+                cmd += ["--header", "Content-Type: application/json",
+                        "--data-binary", json.dumps(body, separators=(",", ":"))]
+            if source is not None:
+                # Use curl's stream-based multipart; no whole-file RAM buffer.
+                # The file is a private, validated snapshot in our work directory.
+                escaped = filename.replace("\\", "\\\\").replace('"', '\\"')
+                # --form-string prevents multipart field values from being
+                # interpreted as special curl @file syntax. The file itself is
+                # the one deliberately streamed via --form.
+                for key, value in (multipart_fields or {}).items():
+                    cmd += ["--form-string", f"{key}={value}"]
+                cmd += ["--form", 'file=@' + str(source) + ';filename="' + escaped + '"']
+            cmd.append(url)
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True,
+                                        check=False)
+            except OSError as e:
+                abort(f"HTTP {method} transport could not start: {e}")
+            status_str = result.stdout.strip()
+            try:
+                status = int(status_str)
+            except ValueError:
+                status = 0
+            if self.verbose:
+                log(f"HTTP {method} {url} -> {status} (attempt {attempt}/{attempts})")
+            if result.returncode == 0 and 200 <= status < 300:
+                if binary:
+                    return out
+                try:
+                    with out.open(encoding="utf-8") as f:
+                        obj = json.load(f)
+                except (ValueError, UnicodeError, OSError) as exc:
+                    abort(f"API {method} {url}: invalid JSON: {exc}")
+                if not isinstance(obj, dict):
+                    abort(f"API {method} {url}: JSON response is not an object")
+                # The published Ghost API v2 JSON success envelope requires
+                # ok: true. HTTP 200 alone is not sufficient confirmation.
+                if obj.get("ok") is not True:
+                    abort(f"API {method} {url}: missing ok:true / application failure: "
+                          f"{str(obj.get('error') or obj.get('message') or 'unspecified')[:300]}")
+                if isinstance(obj.get("status"), str) and obj["status"].lower() in ("error", "failed"):
+                    abort(f"API {method} {url}: application status={obj['status']}")
+                return obj
+            # HTTP errors are terminal. For GET network/5xx/429 we allow bounded
+            # retries; POSTs are never retried (unknown server-side commit state).
+            retryable = retry and attempt < attempts and (
+                result.returncode != 0 or status in (408, 429) or 500 <= status <= 599)
+            reason = result.stderr.strip().splitlines()[-1:] or []
+            message = reason[0][:220] if reason else "no transport details"
+            # Decode structured error responses where possible. Especially
+            # important for file_replace: 409 file_changed is a strict stop,
+            # not a reason to retry or fall back to create-only upload.
+            api_error = ""
+            if out.is_file():
+                try:
+                    with out.open(encoding="utf-8") as stream:
+                        err_payload = json.load(stream)
+                    if isinstance(err_payload, dict):
+                        err_data = err_payload.get("data")
+                        candidates = [err_payload.get("error"), err_payload.get("code"),
+                                      err_payload.get("message")]
+                        if isinstance(err_data, dict):
+                            candidates += [err_data.get("error"), err_data.get("code"),
+                                           err_data.get("message")]
+                        api_error = next((str(e)[:180] for e in candidates if isinstance(e, (str, int))), "")
+                except (ValueError, OSError, UnicodeError):
+                    pass
+            if retryable:
+                log(f"WARN HTTP {method} {url} failed status={status} curl_rc={result.returncode}; retrying ({attempt}/{attempts}): {api_error or message}")
+                time.sleep(self.retry_sleep)
+                continue
+            if status == 409:
+                abort(f"CONFLICT HTTP 409 on {method} {url}: server version changed or precondition failed ({api_error or 'conflict'}); server wins, refusing overwrite")
+            abort(f"HTTP {method} {url} failed status={status} curl_rc={result.returncode}: {api_error or message}")
+
+    @staticmethod
+    def data(payload):
+        data = payload.get("data", payload)
+        if not isinstance(data, dict):
+            abort("API response data is not an object")
+        return data
+
+    def list_folder(self, folder_id, page_size):
+        """Read ONE folder via the published Ghost API v2 contract.
+
+        As of 2026-11-01, `list` has no offset, cursor, total or has_more.
+        `limit` is independent for files and folders. Therefore if either
+        returned collection fills the requested limit, an undisclosed extra
+        item may exist: NEVER treat that response as a complete inventory.
+        """
+        args = {"action": "list", "space_id": self.space_id, "limit": page_size}
+        if folder_id:
+            args["folder_id"] = folder_id
+        url = self.endpoint(**args)
+        data = self.data(self.request("GET", url, retry=True))
+        files = data.get("files")
+        folders = data.get("folders")
+        if not isinstance(files, list) or not isinstance(folders, list):
+            abort(f"API list folder={folder_id or '/'}: missing files[] or folders[]")
+        if len(files) >= page_size or len(folders) >= page_size:
+            abort(f"API list folder={folder_id or '/'}: truncated/ambiguous result "
+                  f"({len(files)} files, {len(folders)} folders, limit={page_size}); "
+                  "API has no pagination or total. Cannot guarantee complete inventory")
+        return folders, files
+
+    def create_folder(self, name, parent_id):
+        # POST mutation actions are selected via the `action` QUERY parameter.
+        body = {"space_id": self.space_id, "name": name}
+        if parent_id:
+            body["parent_id"] = parent_id
+        data = self.data(self.request("POST", self.endpoint(action="folder_create"),
+                                      body=body))
+        fid = data.get("folder_id")
+        if not isinstance(fid, str) or not fid:
+            abort(f"API folder_create {name!r}: response missing folder_id")
+        return fid
+
+    def download(self, file_id):
+        return self.request("GET", self.endpoint(action="content", file_id=file_id),
+                            binary=True, retry=True, timeout=self.transfer_timeout)
+
+    def upload(self, source, filename, folder_id):
+        # The contract requires both space_id and optional folder_id INSIDE
+        # multipart/form-data. Do not rely on folder_id in the query string.
+        form = {"space_id": self.space_id}
+        if folder_id:
+            form["folder_id"] = folder_id
+        data = self.data(self.request("POST", self.endpoint(action="upload"),
+                                      source=source, filename=filename,
+                                      multipart_fields=form,
+                                      timeout=self.transfer_timeout))
+        reported = data.get("sha256")
+        if reported is not None and not is_sha(reported):
+            abort(f"API upload {filename!r}: invalid sha256 in response")
+        return (reported or "").lower()
+
+    def replace(self, source, filename, file_id, expected_sha256):
+        """Replace bytes in place; never create a new file when updating."""
+        if not isinstance(file_id, str) or not file_id:
+            abort("file_replace requires an existing file_id")
+        if not is_sha(expected_sha256):
+            abort("file_replace requires valid expected_sha256")
+        data = self.data(self.request(
+            "POST", self.endpoint(action="file_replace"),
+            source=source, filename=filename,
+            multipart_fields={"file_id": file_id,
+                              "expected_sha256": expected_sha256},
+            timeout=self.transfer_timeout))
+        reported = data.get("sha256")
+        if reported is not None and not is_sha(reported):
+            abort(f"API file_replace {filename!r}: invalid sha256 in response")
+        returned_id = data.get("file_id")
+        if returned_id is not None and returned_id != file_id:
+            abort(f"API file_replace {filename!r}: file_id changed unexpectedly")
+        return (reported or "").lower()
+
+
+class Synchronizer:
+    def __init__(self, args, client, root, state_name, work, page_size, max_depth):
+        self.args, self.client = args, client
+        self.root = Path(root).absolute()
+        self.state_path = self.root / state_name
+        self.work = Path(work)
+        self.page_size = page_size
+        self.max_depth = max_depth
+        self.folders = {"": ""}  # relative directory path -> remote folder id
+        self.remote = {}         # relative file path -> remote file record
+        self.state = {"files": {}}
+        self.counts = {"folders": 0, "downloads": 0, "uploads": 0,
+                       "conflicts": 0, "skipped": 0}
+        self.actions = []
+        self.remote_absent = []
+
+    def local_path(self, rel):
+        path = self.root
+        for component in rel.split("/"):
+            validate_name(component, "local path component")
+            path = path / component
+        # Refuse a symlink at ANY component: no redirection outside the tree.
+        ancestor = self.root
+        if ancestor.is_symlink():
+            abort(f"sync root is a symlink: {self.root}")
+        for part in rel.split("/"):
+            ancestor = ancestor / part
+            if ancestor.is_symlink():
+                abort(f"symlink in sync path, refusing: {ancestor}")
+        return path
+
+    def load_state(self):
+        if not self.state_path.exists():
+            return
+        if self.state_path.is_symlink() or not self.state_path.is_file():
+            abort("state file is a symlink or not a regular file")
+        try:
+            with self.state_path.open(encoding="utf-8") as f:
+                raw = json.load(f)
+        except (OSError, ValueError) as exc:
+            abort(f"cannot parse state file {self.state_path}: {exc}")
+        if not isinstance(raw, dict) or not isinstance(raw.get("files"), dict):
+            abort("state JSON has invalid structure")
+        for name, pair in raw["files"].items():
+            if not isinstance(name, str) or not name or name.startswith("/"):
+                abort("state contains unsafe path")
+            for comp in name.split("/"):
+                validate_name(comp, "state")
+            if (not isinstance(pair, dict) or
+                not all(is_sha(pair.get(k)) for k in ("remote_sha256", "local_sha256"))):
+                abort(f"state entry for {name!r} is malformed")
+        self.state = raw
+
+    def save_state(self):
+        if self.args.dry_run:
+            return
+        self.local_path(self.state_path.name)
+        self.root.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".telmi-state-", dir=self.root)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.state, f, indent=2, sort_keys=True)
+                f.write("\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.state_path)
+        except OSError as exc:
+            abort(f"state write FAILED: {exc}")
+        finally:
+            if os.path.lexists(tmp):
+                os.unlink(tmp)
+
+    def set_state(self, rel, remote_sha, local_sha):
+        self.state["files"][rel] = {
+            "remote_sha256": remote_sha, "local_sha256": local_sha}
+        self.save_state()
+
+    def fetch_tree(self):
+        queue = [("", "", 0)]
+        folder_ids = set()
+        file_ids = set()
+        reserved = canonical_path(self.state_path.name)
+        seen_paths = {reserved: "[reserved sync state]"}
+        while queue:
+            path, folder_id, depth = queue.pop(0)
+            if depth > self.max_depth:
+                abort(f"maximum folder depth exceeded at {path!r}")
+            if folder_id in folder_ids:
+                abort(f"API returned repeated/cyclic folder_id {folder_id!r}")
+            folder_ids.add(folder_id)
+            folders, files = self.client.list_folder(folder_id, self.page_size)
+            self.counts["folders"] += 1
+            if self.args.verbose:
+                log(f"LIST {path or '/'}: {len(folders)} folders, {len(files)} files")
+            for entry in folders:
+                if not isinstance(entry, dict):
+                    abort(f"API list {path or '/'}: invalid folder record")
+                fid = entry.get("folder_id")
+                name = validate_name(entry.get("name"), "remote folder")
+                if not isinstance(fid, str) or not fid:
+                    abort(f"API list {path or '/'}: folder missing folder_id")
+                parent = entry.get("parent_id")
+                allowed_parents = (None, "", folder_id) if folder_id else (None, "", self.client.space_id)
+                if parent not in allowed_parents:
+                    abort(f"API list {path or '/'}: folder {name!r} has unexpected parent_id")
+                rel = f"{path}/{name}" if path else name
+                key = canonical_path(rel)
+                if key in seen_paths:
+                    abort(f"remote path collision {rel!r} vs {seen_paths[key]!r}")
+                seen_paths[key] = rel
+                if fid in folder_ids or any(q[1] == fid for q in queue):
+                    abort(f"remote folder ID repeated: {fid}")
+                self.folders[rel] = fid
+                queue.append((rel, fid, depth + 1))
+            for entry in files:
+                if not isinstance(entry, dict):
+                    abort(f"API list {path or '/'}: invalid file record")
+                fid = entry.get("file_id")
+                name = validate_name(entry.get("name"), "remote file")
+                sha = entry.get("sha256")
+                if not isinstance(fid, str) or not fid or fid in file_ids:
+                    abort(f"API list {path or '/'}: missing/duplicate file_id for {name!r}")
+                if not is_sha(sha):
+                    abort(f"API list {path or '/'}: missing/invalid sha256 for {name!r}")
+                parent = entry.get("folder_id")
+                allowed_parents = (None, "", folder_id) if folder_id else (None, "", self.client.space_id)
+                if parent not in allowed_parents:
+                    abort(f"API list {path or '/'}: file {name!r} has unexpected folder_id")
+                rel = f"{path}/{name}" if path else name
+                key = canonical_path(rel)
+                if key in seen_paths:
+                    abort(f"remote path collision {rel!r} vs {seen_paths[key]!r}")
+                seen_paths[key] = rel
+                file_ids.add(fid)
+                self.remote[rel] = {"file_id": fid, "sha": sha.lower(),
+                                    "folder_id": folder_id}
+        if not self.remote:
+            abort("remote inventory contains ZERO FILES; hard abort, no sync attempted")
+        log(f"Remote inventory validated: {len(self.remote)} files, {self.counts['folders']} folders")
+
+    def local_files(self):
+        if not self.root.exists():
+            return {}
+        if self.root.is_symlink() or not self.root.is_dir():
+            abort("sync root is not a normal directory")
+        found = {}
+        case_map = {}
+        def walk_error(exc):
+            abort(f"cannot traverse local directory: {exc}")
+        for base, dirs, files in os.walk(self.root, followlinks=False,
+                                         onerror=walk_error):
+            for name in dirs + files:
+                validate_name(name, "local")
+                absolute = Path(base) / name
+                if absolute.is_symlink():
+                    abort(f"local symlink refused: {absolute}")
+                rel = absolute.relative_to(self.root).as_posix()
+                key = canonical_path(rel)
+                if key in case_map:
+                    abort(f"local case/Unicode collision: {rel!r}, {case_map[key]!r}")
+                case_map[key] = rel
+            for name in files:
+                absolute = Path(base) / name
+                if not absolute.is_file():
+                    abort(f"local non-regular file refused: {absolute}")
+                rel = absolute.relative_to(self.root).as_posix()
+                if rel == self.state_path.name or name == ".DS_Store" or name.startswith(".telmi-") or ".conflict-" in name:
+                    continue
+                found[rel] = sha256_file(absolute)
+        return found
+
+    def preflight(self):
+        self.load_state()
+        self.fetch_tree()  # entire listing MUST succeed before any write
+        local = self.local_files()
+        remote_paths = set(self.remote)
+        remote_case_index = {canonical_path(p): p for p in (*self.remote.keys(), *self.folders.keys())}
+        for rel in local:
+            normalized = canonical_path(rel)
+            if normalized in remote_case_index and remote_case_index[normalized] != rel:
+                abort(f"local and remote path differ only by case/Unicode: {rel!r} vs {remote_case_index[normalized]!r}")
+        for rel, remote in sorted(self.remote.items()):
+            path = self.local_path(rel)
+            if rel not in local:
+                if path.exists() and not path.is_file():
+                    abort(f"remote file conflicts with local directory: {rel}")
+                if self.args.mode != "push":
+                    self.actions.append(("download", rel, None))
+                else:
+                    self.counts["skipped"] += 1
+                continue
+            lsha, rsha = local[rel], remote["sha"]
+            state = self.state["files"].get(rel)
+            if rsha == lsha:
+                if not state or state["remote_sha256"] != rsha or state["local_sha256"] != lsha:
+                    self.actions.append(("adopt", rel, lsha))
+                continue
+            # New-to-client file present on both sides: server wins, ALWAYS.
+            rchanged = not state or state["remote_sha256"] != rsha
+            lchanged = not state or state["local_sha256"] != lsha
+            if rchanged and lchanged:
+                if self.args.mode != "push":
+                    self.actions.append(("conflict", rel, lsha))
+                else:
+                    self.counts["skipped"] += 1
+            elif rchanged:
+                if self.args.mode != "push":
+                    self.actions.append(("download", rel, lsha))
+                else:
+                    self.counts["skipped"] += 1
+            elif lchanged:
+                if self.args.mode != "pull":
+                    self.actions.append(("upload", rel, lsha))
+                else:
+                    self.counts["skipped"] += 1
+            else:
+                # Should never happen with valid hashes and state.
+                abort(f"inconsistent sync state for {rel}")
+        for rel, lsha in sorted(local.items()):
+            if rel in remote_paths:
+                continue
+            if rel in self.state["files"]:
+                # Historical remote file was deleted. KEEP local, don't resurrect.
+                self.remote_absent.append(rel)
+                self.counts["skipped"] += 1
+                continue
+            # Prevent case-fold alias with any remote path or remote directory.
+            key = canonical_path(rel)
+            if key in remote_case_index:
+                abort(f"local file collides with remote path: {rel}")
+            if self.args.mode != "pull":
+                self.actions.append(("upload_new", rel, lsha))
+            else:
+                self.counts["skipped"] += 1
+        # Local file sitting where a remote directory must be created.
+        for folder in self.folders:
+            if folder and folder in local:
+                abort(f"local file blocks remote folder: {folder}")
+        # No side effects during preflight (including on dry-run).
+        log(f"Plan: {len(self.actions)} actions, {len(self.remote_absent)} previously-synced remote deletions")
+
+    def current_remote_match(self, rel, expected):
+        folder_rel = rel.rpartition("/")[0]
+        folder_id = self.folders.get(folder_rel)
+        if folder_id is None:
+            abort(f"unknown remote parent folder for {rel}")
+        _, entries = self.client.list_folder(folder_id, self.page_size)
+        name = rel.rpartition("/")[2]
+        matches = [e for e in entries if isinstance(e, dict) and e.get("name") == name]
+        if len(matches) > 1:
+            abort(f"remote duplicate name for {rel}: refusing upload")
+        if expected is None:
+            if matches:
+                abort(f"remote file appeared since inventory: {rel}; aborting to preserve server")
+        else:
+            if not matches or matches[0].get("file_id") != expected["file_id"] or matches[0].get("sha256", "").lower() != expected["sha"]:
+                abort(f"remote file changed since inventory: {rel}; aborting to preserve server")
+
+    def ensure_remote_folder(self, rel):
+        if rel in self.folders:
+            return self.folders[rel]
+        parent, _, name = rel.rpartition("/")
+        parent_id = self.ensure_remote_folder(parent)
+        # Check for concurrent creation before POST (fail closed).
+        children, _ = self.client.list_folder(parent_id, self.page_size)
+        matches = [d for d in children if isinstance(d, dict) and d.get("name") == name]
+        if matches:
+            abort(f"remote folder appeared since inventory: {rel}; rerun sync")
+        fid = self.client.create_folder(name, parent_id)
+        self.folders[rel] = fid
+        log(f"MKDIR-REMOTE {rel}/")
+        return fid
+
+    def create_local_dirs(self):
+        for rel in sorted(self.folders, key=lambda x: (x.count("/"), x)):
+            if not rel:
+                continue
+            path = self.local_path(rel)
+            if self.args.dry_run:
+                if not path.is_dir():
+                    log(f"MKDIR {rel}/ (dry-run)")
+                continue
+            if not path.exists():
+                try:
+                    path.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    abort(f"mkdir {rel} failed: {e}")
+                if self.args.verbose:
+                    log(f"MKDIR {rel}/")
+            elif not path.is_dir():
+                abort(f"local path isn't a directory: {rel}")
+
+    def conflict_copy(self, rel, expected_sha):
+        src = self.local_path(rel)
+        if not src.is_file():
+            return  # Local file was removed after planning.
+        stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S")
+        sidecar = src.with_name(src.name + f".conflict-{stamp}-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+        # Exclusive creation, never clobber an earlier conflict copy.
+        with src.open("rb") as inp, sidecar.open("xb") as out:
+            shutil.copyfileobj(inp, out, length=1024 * 1024)
+            out.flush()
+            os.fsync(out.fileno())
+        if sha256_file(sidecar) != expected_sha:
+            abort(f"local file changed while preserving conflict {rel}; aborting")
+        log(f"CONFLICT-SERVER-WINS {rel} (local copy kept as {sidecar.name})")
+        self.counts["conflicts"] += 1
+
+    def do_download(self, rel, conflict, planned_local_sha):
+        remote = self.remote[rel]
+        dest = self.local_path(rel)
+        if self.args.dry_run:
+            log(f"{'CONFLICT-SERVER-WINS' if conflict else 'DOWNLOAD'} {rel} (dry-run)")
+            self.counts["downloads"] += 1
+            self.counts["conflicts"] += int(conflict)
+            return
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        # Download into a separate staging file in the same filesystem.
+        tmp_fd, tmp_name = tempfile.mkstemp(prefix=".telmi-download-", dir=dest.parent)
+        os.close(tmp_fd)
+        try:
+            downloaded = self.client.download(remote["file_id"])
+            shutil.copyfile(downloaded, tmp_name)
+            got_sha = sha256_file(tmp_name)
+            if got_sha != remote["sha"]:
+                abort(f"download checksum mismatch for {rel}: expected={remote['sha']} got={got_sha}")
+            # Revalidate after transfer: do not replace local bytes with a
+            # server version superseded while the download was running.
+            self.current_remote_match(rel, remote)
+            # Catch modifications made while download was in progress. If a
+            # late local modification exists, preserve it before server wins.
+            current_sha = sha256_file(dest) if dest.is_file() else None
+            if dest.exists() and not dest.is_file():
+                abort(f"download destination became non-file: {rel}")
+            if current_sha and current_sha != got_sha:
+                if conflict or planned_local_sha != current_sha:
+                    self.conflict_copy(rel, current_sha)
+            elif conflict and current_sha:
+                # Local changed during the preflight but is now equal to server.
+                pass
+            if dest.is_symlink() or dest.parent.is_symlink():
+                abort(f"symlink appeared during download: {rel}")
+            os.replace(tmp_name, dest)
+            self.set_state(rel, got_sha, got_sha)
+            log(f"DOWNLOAD {rel}")
+            self.counts["downloads"] += 1
+        finally:
+            if os.path.lexists(tmp_name):
+                os.unlink(tmp_name)
+
+    def do_upload(self, rel, planned_sha, is_new):
+        if self.args.dry_run:
+            log(f"{'UPLOAD' if is_new else 'REPLACE'} {rel} (dry-run)")
+            self.counts["uploads"] += 1
+            return
+        src = self.local_path(rel)
+        if not src.is_file() or sha256_file(src) != planned_sha:
+            abort(f"local file changed since planning: {rel}; rerun to avoid unintended upload")
+        parent_rel, _, filename = rel.rpartition("/")
+        folder_id = self.ensure_remote_folder(parent_rel)
+        expected = self.remote.get(rel)
+        # Server-wins precondition: abort if server changed since initial scan.
+        self.current_remote_match(rel, None if is_new else expected)
+        # Snapshot the exact bytes being uploaded. POST is deliberately NEVER
+        # retried: on timeout, the API may already have committed the upload.
+        snap = self.work / ("upload-" + uuid.uuid4().hex)
+        shutil.copyfile(src, snap)
+        if sha256_file(snap) != planned_sha:
+            abort(f"local file changed during upload snapshot: {rel}")
+        if is_new:
+            # The Ghost API's upload action is CREATE-ONLY.
+            reported_sha = self.client.upload(snap, filename, folder_id)
+            operation = "UPLOAD"
+        else:
+            # Critical for server-wins: file_replace checks the server's
+            # expected SHA atomically. HTTP 409 is a hard stop, never an upload.
+            if expected is None:
+                abort(f"missing remote file record for replacement: {rel}")
+            reported_sha = self.client.replace(
+                snap, filename, expected["file_id"], expected["sha"])
+            operation = "REPLACE"
+        if reported_sha and reported_sha != planned_sha:
+            abort(f"API {operation} checksum mismatch for {rel}: reported={reported_sha} local={planned_sha}")
+        # Verify exactly one matching filename, correct bytes, and (for a
+        # replacement) the SAME file_id. This preserves share references.
+        _, files = self.client.list_folder(folder_id, self.page_size)
+        matches = [f for f in files if isinstance(f, dict) and f.get("name") == filename]
+        if len(matches) != 1 or matches[0].get("sha256", "").lower() != planned_sha:
+            abort(f"post-{operation} verification FAILED for {rel}: expected one file with sha256={planned_sha}, found {len(matches)} matching name(s)")
+        if not is_new and matches[0].get("file_id") != expected["file_id"]:
+            abort(f"post-REPLACE verification FAILED for {rel}: file_id changed; aborting without updating local state")
+        self.remote[rel] = {"file_id": matches[0]["file_id"], "sha": planned_sha,
+                            "folder_id": folder_id}
+        self.set_state(rel, planned_sha, planned_sha)
+        log(f"{operation} {rel}")
+        self.counts["uploads"] += 1
+
+    def run(self):
+        self.preflight()
+        for rel in self.remote_absent:
+            log(f"SKIP {rel} (deleted on server; local copy retained, NOT re-uploaded)")
+        self.create_local_dirs()
+        for action, rel, baseline in self.actions:
+            if action == "adopt":
+                if self.args.dry_run:
+                    log(f"ADOPT {rel} (dry-run)")
+                else:
+                    # Don't store stale hashes if files changed after preflight.
+                    remote_sha = self.remote[rel]["sha"]
+                    if sha256_file(self.local_path(rel)) != remote_sha:
+                        abort(f"local file changed before state adoption: {rel}")
+                    self.set_state(rel, remote_sha, remote_sha)
+            elif action in ("download", "conflict"):
+                self.do_download(rel, action == "conflict", baseline)
+            elif action in ("upload", "upload_new"):
+                self.do_upload(rel, baseline, action == "upload_new")
+            else:
+                abort(f"unknown action {action}")
+        log("telmi-files-sync done: " + " ".join(f"{k}={v}" for k, v in self.counts.items()) + " errors=0")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="telmi OS Files two-way sync")
+    parser.add_argument("--dry-run", action="store_true")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--pull", action="store_true")
+    modes.add_argument("--push", action="store_true")
+    parser.add_argument("--verbose", "-v", action="store_true")
+    args = parser.parse_args()
+    args.mode = "pull" if args.pull else ("push" if args.push else "both")
+    jwt = os.environ.get("TELMI_GHOST_JWT", "")
+    if not jwt or jwt == "PASTE_YOUR_GHOST_JWT_HERE":
+        abort("set TELMI_GHOST_JWT before running")
+    base = os.environ.get("TELMI_BASE_URL", "").rstrip("/")
+    if not base.startswith("https://"):
+        abort("TELMI_BASE_URL must use HTTPS")
+    space_id = os.environ.get("TELMI_SPACE_ID", "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}(?:-[A-Za-z0-9_-]+)*", space_id):
+        abort("TELMI_SPACE_ID invalid")
+    root = Path(os.environ["SYNC_DIR"]).expanduser().absolute()
+    state_name = os.environ["STATE_FILE"]
+    validate_name(state_name, "STATE_FILE")
+    page_size = config_int("LIST_PAGE_SIZE", 1)
+    if page_size > 500:
+        abort("LIST_PAGE_SIZE must be <= 500 (maximum in published Ghost API)")
+    max_depth = config_int("MAX_FOLDER_DEPTH", 1)
+    stale = config_int("LOCK_STALE_MINUTES", 1)
+    retries = config_int("HTTP_RETRIES", 1)
+    retry_sleep = config_int("HTTP_RETRY_SLEEP", 0)
+    ct = config_int("CURL_CONNECT_TIMEOUT", 1)
+    rt = config_int("CURL_READ_TIMEOUT", 1)
+    tt = config_int("CURL_TRANSFER_TIMEOUT", 1)
+    log(f"telmi-files-sync start mode={args.mode} dry_run={int(args.dry_run)} space={space_id}")
+    with OwnedLock(os.environ["LOCK_DIR"], stale):
+        with tempfile.TemporaryDirectory(prefix="telmi-files-sync-") as work:
+            client = Client(base, space_id, jwt, work, retries, retry_sleep,
+                            ct, rt, tt, args.verbose)
+            sync = Synchronizer(args, client, root, state_name, work,
+                                page_size, max_depth)
+            sync.run()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except SyncError as exc:
+        log(f"ERROR HARD STOP: {exc}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        log("ERROR HARD STOP: interrupted")
+        sys.exit(130)
+    except Exception as exc:
+        # Unexpected programming/filesystem errors must also fail closed.
+        log(f"ERROR HARD STOP: unexpected {type(exc).__name__}: {exc}")
+        sys.exit(1)
+PY

@@ -8,6 +8,15 @@
       "runtime": "php",
       "install_type": "php-public",
       "plan_tag": "pro"
+    },
+    "tools:files-sync:php": {
+      "title": "Files Sync",
+      "short_description": "A guided page and local clients for syncing a telmi OS Files space with macOS or Windows.",
+      "entrypoint": "index.php",
+      "icon_repo_path": "tools/files-sync/php/public/assets/mantis-mini.svg",
+      "runtime": "php",
+      "install_type": "php-public",
+      "plan_tag": "pro"
     }
   }
 }
