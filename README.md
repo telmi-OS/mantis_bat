@@ -57,6 +57,8 @@ connectors/telegram/php/
 tools/rag-prep/php/
 tools/ghost-eval/php/
 tools/nextcloud-talk-connect/php/
+tools/files-sync/php/
+tools/files-sync-s3/php/
 ```
 
 The Telegram connector is built for:
@@ -94,6 +96,8 @@ The standalone Ghost Eval tool challenges a configured Ghost through realtime Gh
 The standalone Nextcloud Talk Connect tool creates public Talk rooms through a protected Mantis Bat GET endpoint. Its installer validates a dedicated Nextcloud service account, generates a Ghost X-Auth key, and displays private setup URLs. The protected dashboard includes copy-ready Ghost preset fields. Concurrent calls with a normalized matching meeting name reuse one room result for five minutes.
 
 The standalone Files Sync tool is a no-auth guided page with two view modes and local macOS and Windows sync clients. Its v6 clients preserve file/folder IDs across recognized moves and propagate file deletions: an unchanged server copy is archived before a local deletion, while server deletions remove tracked local copies without an archive. If a local deletion conflicts with changed server content, server wins and is restored. The page walks a user through configuring one Files space on their computer; it does not store credentials or run the sync itself. See [the Files Sync guide](docs/files-sync-tool.md) for the deletion behavior and safeguards.
+
+The standalone Files Sync AWS S3 tool is a matching no-auth guide with Guided and Read all views. It provides a ready-to-upload AWS Lambda ZIP, an IAM policy template, source and an operations guide for syncing a Telmi Files space with an S3 prefix. AWS performs the sync; the Mantis Bat page does not configure AWS or receive credentials. See [the Files Sync AWS guide](docs/files-sync-s3-tool.md).
 
 The RAG dashboard uses a private bearer URL (`index.php?key=...`), not a traditional password login. It is Hades-compatible: 7 MiB per file and per job, one job per cron call, a 20-second Ghost request timeout, and persisted three-attempt retry handling. GD and external process/PDF binaries are not required.
 
@@ -153,6 +157,7 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - [Ghost Eval Tool](docs/ghost-eval-tool.md)
 - [Nextcloud Talk Connect](docs/nextcloud-talk-connect.md)
 - [Files Sync Tool](docs/files-sync-tool.md)
+- [Files Sync AWS S3 Tool](docs/files-sync-s3-tool.md)
 - [Self-Hosting RAG Prep PHP](docs/self-hosting-rag-prep-php.md)
 - [Security](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
@@ -177,4 +182,4 @@ Plain-language boundary:
 
 ## Status
 
-This branch contains the Telegram PHP connector, the RAG Prep and Ghost Eval tools, the standalone Nextcloud Talk Connect PHP tool, and the Files Sync guide with local macOS and Windows clients.
+This branch contains the Telegram PHP connector, the RAG Prep and Ghost Eval tools, the standalone Nextcloud Talk Connect PHP tool, the desktop Files Sync guide, and the AWS S3 Files Sync guide with a ready Lambda deployment bundle.

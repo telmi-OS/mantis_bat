@@ -36,6 +36,7 @@ The current shipped modules are:
 - one standalone Ghost Eval utility tool for PHP in `tools/ghost-eval/php/`
 - one Nextcloud Talk meeting-link utility tool for PHP in `tools/nextcloud-talk-connect/php/`
 - one no-auth Files Sync guide with local macOS and Windows clients in `tools/files-sync/php/`
+- one no-auth AWS S3 Files Sync guide with a ready Lambda deployment package in `tools/files-sync-s3/php/`
 
 The repository is shaped as a connector framework, and this is what is public today:
 
@@ -44,6 +45,7 @@ The repository is shaped as a connector framework, and this is what is public to
 - one standalone Ghost Eval PHP tool in `tools/ghost-eval/php/`
 - one Nextcloud Talk Connect PHP tool in `tools/nextcloud-talk-connect/php/`
 - one Files Sync guide module in `tools/files-sync/php/`
+- one AWS S3 Files Sync guide module in `tools/files-sync-s3/php/`
 - one private paired Telegram owner
 - Ghost chat submission through `POST /chat` in queued mode
 - Ghost chat history enabled in the request payload
@@ -95,6 +97,8 @@ The Ghost Eval tool is another standalone utility flow:
 The Files space is configured separately from chat memory. Challenge chats stay in the Ghost's personal conversation context; selected group IDs are sent as `active_groups` to add their memories when RAG is enabled.
 
 The Files Sync tool has a different deployment boundary: Hades serves its PHP guide page, while the chosen computer runs the downloaded v6 client with its own Ghost JWT, Files-space ID, local directory, and schedule. The guide page has no sign-in or installer and never receives the JWT. The clients preserve IDs for recognized moves and propagate file deletions for previously synchronized content: when the server copy is unchanged, a local deletion archives verified bytes before deleting remotely; if it changed, server wins and is restored. Server deletions remove tracked local copies without an archive. Empty folder deletion is not propagated. See [Files Sync Tool](files-sync-tool.md) for the safeguards and mode behavior.
+
+The AWS S3 Files Sync tool uses the same Mantis Bat guide style and images, but the downloaded Python client runs in AWS Lambda. It pairs a dedicated S3 prefix with one Telmi Files space, reads the Ghost JWT from AWS Secrets Manager, and stores sync state and archives in S3. The guide page does not deploy or invoke Lambda and receives no credentials. See [Files Sync AWS S3 Tool](files-sync-s3-tool.md).
 
 ## Why Teleport AI Publishes This
 
