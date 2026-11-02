@@ -58,7 +58,7 @@ $build = $config->buildFingerprint();
                     <button class="button button-primary" type="button" data-next>Let’s set it up <span aria-hidden="true">→</span></button>
                     <span class="quiet-note">No account or sign-in on this guide page.</span>
                 </div>
-                <div class="cover-pills"><span>Recursive folders</span><span>SHA-256 checked</span><span>Preview first</span></div>
+                <div class="cover-pills"><span>Recursive folders</span><span>Recognized moves keep IDs</span><span>Preview first</span></div>
             </div>
             <div class="cover-visual" aria-hidden="true">
                 <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
@@ -103,6 +103,7 @@ $build = $config->buildFingerprint();
                 <article class="info-card"><span class="number-badge">04</span><div><h3>A private local folder</h3><p>Pick a folder outside public, shared, or automatically cloud-synced locations.</p></div></article>
             </div>
             <aside class="notice-card"><span class="notice-icon">!</span><p><strong>Start with a Files space that already has at least one file.</strong> The client stops if the remote inventory is empty or may be incomplete.</p></aside>
+            <aside class="notice-card"><span class="notice-icon">!</span><p><strong>File deletions are mirrored.</strong> In two-way sync, a local deletion archives and verifies the unchanged server copy before deleting it remotely; if the server copy changed, the server wins and is restored. A server deletion removes the tracked local copy without an archive, even if it was edited. Archives stay in <code>.telmi-deleted/</code> on this computer and are not cleaned up automatically. Test with disposable files first.</p></aside>
             <div class="slide-actions"><button class="button button-primary" type="button" data-next>Continue <span aria-hidden="true">→</span></button></div>
         </div>
     </section>
@@ -185,8 +186,8 @@ nano "$HOME/bin/telmi-files-sync.sh"</code></pre></div>
             <h2 id="dry-run-mac-title">Preview before<br>anything syncs.</h2>
             <p class="lead">The dry run reads and validates the remote inventory, then prints the planned actions without changing files or sync state.</p>
             <div class="command-card command-card-large"><div class="command-head"><span>Run in Terminal</span><button type="button" class="copy-button" data-copy="mac-dry-run">Copy</button></div><pre id="mac-dry-run"><code>bash "$HOME/bin/telmi-files-sync.sh" --dry-run --verbose</code></pre></div>
-            <div class="check-grid"><div><span class="checkmark">✓</span><span>See the expected nested folders and files.</span></div><div><span class="checkmark">✓</span><span>Check the proposed downloads, uploads, and replacements.</span></div><div><span class="checkmark">✓</span><span>Confirm the summary ends with <code>errors=0</code>.</span></div></div>
-            <aside class="notice-card"><span class="notice-icon">!</span><p>It still makes API reads and uses a short-lived lock and temporary work folder. An empty space or a folder listing at its 500-item limit causes a hard stop.</p></aside>
+            <div class="check-grid"><div><span class="checkmark">✓</span><span>See the expected nested folders and files.</span></div><div><span class="checkmark">✓</span><span>Review downloads, uploads, replacements, and any planned deletions.</span></div><div><span class="checkmark">✓</span><span>Confirm the summary ends with <code>errors=0</code>.</span></div></div>
+            <aside class="notice-card"><span class="notice-icon">!</span><p>Stop if a planned <code>ARCHIVE+DELETE-REMOTE</code> or <code>DELETE-LOCAL</code> is unexpected. A dry run reads the API and uses a short-lived lock and temporary work folder, but does not sync files or state. Empty spaces and listings at the 500-item limit cause a hard stop.</p></aside>
             <div class="slide-actions"><button class="button button-primary" type="button" data-next>Looks good · do the first sync <span aria-hidden="true">→</span></button></div>
         </div>
     </section>
@@ -197,8 +198,8 @@ nano "$HOME/bin/telmi-files-sync.sh"</code></pre></div>
             <h2 id="dry-run-windows-title">Preview before<br>anything syncs.</h2>
             <p class="lead">The dry run reads and validates the remote inventory, then prints the planned actions without changing files or sync state.</p>
             <div class="command-card command-card-large"><div class="command-head"><span>Run in PowerShell</span><button type="button" class="copy-button" data-copy="windows-dry-run">Copy</button></div><pre id="windows-dry-run"><code>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\bin\telmi-files-sync-windows.ps1" --dry-run --verbose</code></pre></div>
-            <div class="check-grid"><div><span class="checkmark">✓</span><span>See the expected nested folders and files.</span></div><div><span class="checkmark">✓</span><span>Check the proposed downloads, uploads, and replacements.</span></div><div><span class="checkmark">✓</span><span>Confirm the summary ends with <code>errors=0</code>.</span></div></div>
-            <aside class="notice-card"><span class="notice-icon">!</span><p>It still makes API reads, writes a diagnostic log, and uses a short-lived lock and temporary work folder. An empty space or a folder listing at its 500-item limit causes a hard stop.</p></aside>
+            <div class="check-grid"><div><span class="checkmark">✓</span><span>See the expected nested folders and files.</span></div><div><span class="checkmark">✓</span><span>Review downloads, uploads, replacements, and any planned deletions.</span></div><div><span class="checkmark">✓</span><span>Confirm the summary ends with <code>errors=0</code>.</span></div></div>
+            <aside class="notice-card"><span class="notice-icon">!</span><p>Stop if a planned <code>ARCHIVE+DELETE-REMOTE</code> or <code>DELETE-LOCAL</code> is unexpected. A dry run reads the API, writes a diagnostic log, and uses a short-lived lock and temporary work folder, but does not sync files or state. Empty spaces and listings at the 500-item limit cause a hard stop.</p></aside>
             <div class="slide-actions"><button class="button button-primary" type="button" data-next>Looks good · do the first sync <span aria-hidden="true">→</span></button></div>
         </div>
     </section>
@@ -210,7 +211,7 @@ nano "$HOME/bin/telmi-files-sync.sh"</code></pre></div>
             <p class="lead">The first pull downloads the current Files space to your local folder without uploading local files.</p>
             <div class="command-card command-card-large"><div class="command-head"><span>Run in Terminal</span><button type="button" class="copy-button" data-copy="mac-first-run">Copy</button></div><pre id="mac-first-run"><code>bash "$HOME/bin/telmi-files-sync.sh" --pull --verbose</code></pre></div>
             <div class="safety-grid"><article><span class="mini-icon">⇄</span><h3>Server wins conflicts</h3><p>If both sides changed, the server copy replaces the active local file and a timestamped local conflict copy is kept.</p></article><article><span class="mini-icon">◷</span><h3>Keep the state file</h3><p><code>.telmi-sync-state.json</code> remembers prior syncs. Keep it with this local folder.</p></article></div>
-            <p class="small-note">Review the downloaded files before switching to full two-way sync. No file-delete API is used; remote deletions are not re-uploaded when recorded in the state.</p>
+            <p class="small-note">Review the downloaded files before switching to full two-way sync. <code>--pull</code> never deletes server files, but it removes tracked local files deleted from the server without making an archive. Keep the state file; it records object identities and deletion history.</p>
             <div class="slide-actions"><button class="button button-primary" type="button" data-next>Next: make it automatic <span aria-hidden="true">→</span></button></div>
         </div>
     </section>
@@ -222,7 +223,7 @@ nano "$HOME/bin/telmi-files-sync.sh"</code></pre></div>
             <p class="lead">The first pull downloads the current Files space to your local folder without uploading local files.</p>
             <div class="command-card command-card-large"><div class="command-head"><span>Run in PowerShell</span><button type="button" class="copy-button" data-copy="windows-first-run">Copy</button></div><pre id="windows-first-run"><code>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\bin\telmi-files-sync-windows.ps1" --pull --verbose</code></pre></div>
             <div class="safety-grid"><article><span class="mini-icon">⇄</span><h3>Server wins conflicts</h3><p>If both sides changed, the server copy replaces the active local file and a timestamped local conflict copy is kept.</p></article><article><span class="mini-icon">◷</span><h3>Keep the state file</h3><p><code>.telmi-sync-state.json</code> remembers prior syncs. Keep it with this local folder.</p></article></div>
-            <p class="small-note">Review the downloaded files before switching to full two-way sync. No file-delete API is used; remote deletions are not re-uploaded when recorded in the state.</p>
+            <p class="small-note">Review the downloaded files before switching to full two-way sync. <code>--pull</code> never deletes server files, but it removes tracked local files deleted from the server without making an archive. Keep the state file; it records object identities and deletion history.</p>
             <div class="slide-actions"><button class="button button-primary" type="button" data-next>Next: make it automatic <span aria-hidden="true">→</span></button></div>
         </div>
     </section>
@@ -232,10 +233,10 @@ nano "$HOME/bin/telmi-files-sync.sh"</code></pre></div>
             <p class="eyebrow">Step 5 · Mac</p>
             <h2 id="schedule-mac-title">Ready for two-way<br>sync when you are.</h2>
             <div class="final-grid">
-                <div class="final-copy"><p class="lead">Run the script without an option for normal two-way sync. Test uploads and replacements with disposable files before scheduling it.</p>
+                <div class="final-copy"><p class="lead">Run the script without an option for normal two-way sync. Test uploads, replacements, moves, and both deletion directions with disposable files before scheduling it.</p>
                     <div class="command-card"><div class="command-head"><span>Full two-way sync</span><button type="button" class="copy-button" data-copy="mac-full-sync">Copy</button></div><pre id="mac-full-sync"><code>bash "$HOME/bin/telmi-files-sync.sh" --verbose</code></pre></div>
-                    <a class="text-link" href="downloads/TELMI-FILES-SYNC-MACOS.md" download>Download the complete macOS guide <span aria-hidden="true">↓</span></a>
-                    <p class="small-note">The full guide covers launchd, optional cron scheduling, logging, and troubleshooting. A scheduled run needs its own noninteractive credential configuration.</p>
+                    <a class="text-link" href="downloads/telmi-files-sync-macos-guide.md" download>Download the complete macOS guide <span aria-hidden="true">↓</span></a>
+                    <p class="small-note">The full guide covers launchd, optional cron scheduling, deletion archives, logging, migration, and troubleshooting. A scheduled run needs its own noninteractive credential configuration.</p>
                 </div>
                 <div class="recap-card"><span class="recap-kicker">Before unattended sync</span><ul><li>Review the dry-run plan</li><li>Complete one pull successfully</li><li>Test upload and replacement</li><li>Schedule only one sync job</li></ul></div>
             </div>
@@ -248,10 +249,10 @@ nano "$HOME/bin/telmi-files-sync.sh"</code></pre></div>
             <p class="eyebrow">Step 5 · Windows</p>
             <h2 id="schedule-windows-title">Ready for two-way<br>sync when you are.</h2>
             <div class="final-grid">
-                <div class="final-copy"><p class="lead">Run the script without an option for normal two-way sync. Test uploads and replacements with disposable files before scheduling it.</p>
+                <div class="final-copy"><p class="lead">Run the script without an option for normal two-way sync. Test uploads, replacements, moves, and both deletion directions with disposable files before scheduling it.</p>
                     <div class="command-card"><div class="command-head"><span>Full two-way sync</span><button type="button" class="copy-button" data-copy="windows-full-sync">Copy</button></div><pre id="windows-full-sync"><code>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\bin\telmi-files-sync-windows.ps1" --verbose</code></pre></div>
                     <a class="text-link" href="downloads/telmi-files-sync-windows-guide.md" download>Download the complete Windows guide <span aria-hidden="true">↓</span></a>
-                    <p class="small-note">The full guide covers Task Scheduler, logging, and troubleshooting. A scheduled task needs the credential available to its Windows account.</p>
+                    <p class="small-note">The full guide covers Task Scheduler, deletion archives, logging, migration, and troubleshooting. A scheduled task needs the credential available to its Windows account.</p>
                 </div>
                 <div class="recap-card"><span class="recap-kicker">Before unattended sync</span><ul><li>Review the dry-run plan</li><li>Complete one pull successfully</li><li>Test upload and replacement</li><li>Schedule only one sync task</li></ul></div>
             </div>
@@ -268,7 +269,7 @@ nano "$HOME/bin/telmi-files-sync.sh"</code></pre></div>
             <div class="finale-mark"><img src="assets/mantis-mini.svg" alt=""></div>
             <p class="eyebrow">You’re all set</p>
             <h2 id="finish-title">Your Files are<br><span class="gradient-text">coming with you.</span></h2>
-            <p class="lead">Your computer will sync the selected Files space using the credentials and schedule you configured locally.</p>
+            <p class="lead">Your computer will sync the selected Files space using the credentials and schedule you configured locally. Keep the deletion behavior and local archive in mind during everyday use.</p>
             <div class="finish-summary"><span class="finish-check">✓</span><span><strong id="finish-platform">Sync guide complete</strong><small>Keep the script, local folder, and state file private.</small></span></div>
             <div class="slide-actions"><button class="button button-primary" type="button" data-go="intro">Start over</button><button class="button button-secondary" type="button" data-go="platform">Change computer</button></div>
         </div>

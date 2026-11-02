@@ -80,11 +80,11 @@ final class Config
             '/public/assets/theme.css', '/public/assets/guide.js',
             '/public/downloads/telmi-files-sync.sh.txt',
             '/public/downloads/telmi-files-sync-windows.ps1.txt',
-            '/public/downloads/TELMI-FILES-SYNC-MACOS.md',
+            '/public/downloads/telmi-files-sync-macos-guide.md',
             '/public/downloads/telmi-files-sync-windows-guide.md',
             '/storage/config.example.php',
         ];
-        $parts = [(string) $this->get('app.version', '1.0.0')];
+        $parts = [(string) $this->get('app.version', '1.1.0')];
         foreach ($files as $relative) {
             if (is_file($root . $relative)) {
                 $parts[] = $relative . ':' . sha1_file($root . $relative);
@@ -96,7 +96,7 @@ final class Config
     private function load(): array
     {
         $defaults = [
-            'app' => ['title' => 'Files Sync', 'version' => '1.0.0', 'timezone' => 'UTC'],
+            'app' => ['title' => 'Files Sync', 'version' => '1.1.0', 'timezone' => 'UTC'],
             'guide' => [
                 'start_image' => 'assets/images/files-sync-start.webp',
                 'end_image' => 'assets/images/files-sync-end.webp',

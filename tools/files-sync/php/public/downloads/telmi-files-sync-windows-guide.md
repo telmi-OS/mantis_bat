@@ -1,10 +1,10 @@
-# Telmi Files Sync for Windows — Two-Way, Recursive
+# Telmi Files Sync for Windows — v6 identity-aware sync
 
 A single **Windows PowerShell 5.1** script synchronizes one local Windows folder with one selected **Telmi OS Files space** using the **Ghost API v2**. No Python, WSL, Git Bash, curl, PowerShell 7, package manager, administrative privileges, or additional PowerShell modules are needed on a normal Windows 10/11 installation.
 
 This is a **local sync client**, not a cloud service or remotely controllable Windows agent. The client operates with the credentials and Files-space access of the configured Ghost.
 
-> **Safety principle: SERVER WINS.** No deletion operations are propagated. The client requires at least **one remote file** in a validated, complete inventory before proceeding. Network, API, integrity, local filesystem, and state failures cause a logged **HARD STOP**.
+> **Safety principle: SERVER WINS.** Local deletions propagate after a verified archive; server deletions remove tracked local copies directly, without an archive, including locally edited copies. The client requires at least **one remote file** in a validated, complete inventory before proceeding. Network, API, integrity, local filesystem, and state failures cause a logged **HARD STOP**.
 
 ## 1. Synchronization rules
 
@@ -15,15 +15,20 @@ This is a **local sync client**, not a cloud service or remotely controllable Wi
 | New local file | Create remotely using `action=upload`. |
 | Existing local file changed, server unchanged | Replace bytes remotely using `action=file_replace` with the existing `file_id` and `expected_sha256`. |
 | Both local and server changed | **Server wins**. Preserve the divergent local bytes in a `.conflict-...` copy, then download the server version. |
-| File deleted locally | Download it again, unless using `--push`. |
-| File deleted remotely | Keep the existing local copy, log the deletion, and **do not re-upload it** if it is recorded in the sync state. |
+| File deleted locally | Download and SHA-256 verify a hidden archive, journal, then `file_delete`; `--pull` restores it instead. |
+| Local deletion while server contents changed | Server wins: restore the current server version (`--push` defers the download). |
+| File deleted remotely | Delete the tracked local copy **without an archive** in default / `--pull`; `--push` retains tracking for a later pull. |
+| Local file move / rename | `file_update`, preserving `file_id` and shares. |
+| Local folder move / rename | `folder_update`, preserving the folder and child IDs. |
+| Remote file / folder move | Follow the existing remote ID to its new local location. |
+| Ambiguous move vs delete | Hard stop; never silently invent an identity. |
 | Empty remote space (even if folders exist) | **HARD STOP**. At least one remote file must be returned by the API. |
 | HTTP 409 on file replacement | **HARD STOP**; never overwrite the changed server version or fall back to create-only upload. |
 | Any incomplete or unsafe inventory | **HARD STOP** before transfer operations begin. |
 
-The sync is **recursive**. Remote folders are mirrored locally, and local subfolders containing new files can be created on the server. No `file_delete` or `folder_delete` API action is used.
+The sync is **recursive**. Remote folders are mirrored locally, and local subfolders containing new files can be created on the server. File deletion uses `file_delete`. Empty folder deletion is not propagated: deleting a server folder removes its tracked files locally, but empty local directories may remain. Empty remote folders may also remain after local deletion.
 
-**Important:** Rename/move operations are **not** tracked as renames. They can be interpreted as new paths while an old path remains. This client synchronizes file *contents and relative paths*, not a complete bidirectional filesystem journal.
+**Move identity:** The native Windows volume serial + file index identifies ordinary renames on the same filesystem. A move preserves the remote ID; it does not delete and re-upload the file. Copy-and-delete or cross-volume moves can lose that identity. If an unchanged copy makes a deletion ambiguous, the script stops. Keep a move and a content edit as separate sync steps when changing volumes. Hard links with multiple matching paths are rejected.
 
 ## 2. Requirements
 
@@ -71,6 +76,8 @@ The **major version should be 5**, or you may choose to run the same script with
 | `HTTP_READ_TIMEOUT` | GET listing / JSON request timeout | `120` seconds |
 | `HTTP_TRANSFER_TIMEOUT` | Upload / download timeout | `3600` seconds |
 | `LIST_PAGE_SIZE` | Maximum requested items per folder | `500`; may be reduced, cannot exceed 500 |
+| `MAX_LOCAL_DELETES_PER_RUN` | Maximum local-to-server file deletions in one run | `10` |
+| `MAX_LOCAL_DELETE_PERCENT` | Percentage limit for local-to-server deletion batches | `25` (at least one permitted; final server file always protected) |
 | `MAX_FOLDER_DEPTH` | Remote nesting cap | `32` |
 
 Environment variables whose names match the table override script settings when present in the running process. Avoid using the **same `SYNC_DIR` with different spaces**; assign one directory/state pairing per space.
@@ -105,7 +112,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\bin\te
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\bin\telmi-files-sync-windows.ps1" --push --verbose
 ```
 
-`--pull` and `--push` are mutually exclusive. `--dry-run` can be combined with either mode. Add `-ExecutionPolicy Bypass` **to the individual command** if Windows' execution policy would otherwise prevent the downloaded script from running. This does **not** change the machine's persistent execution policy. It does not override organizational security controls such as application allowlisting.
+`--pull` applies server deletions locally but never mutates the server. `--push` can archive/delete server files in response to local deletions, but does not apply server deletions locally. `--pull` and `--push` are mutually exclusive. `--dry-run` can be combined with either mode. Add `-ExecutionPolicy Bypass` **to the individual command** if Windows' execution policy would otherwise prevent the downloaded script from running. This does **not** change the machine's persistent execution policy. It does not override organizational security controls such as application allowlisting.
 
 `--dry-run` still reads the remote API and acquires a short-lived Windows file lock. It creates diagnostic logs and a temporary work folder **outside** the sync directory, but it does not create/change synchronized files, remote content or the sync state.
 
@@ -132,6 +139,9 @@ Some filenames valid in Unix/macOS are invalid on Windows (such as names contain
 | `folder_create` | POST JSON | Create a missing remote folder for a local upload. |
 | `upload` | POST multipart | Create a **new** remote file (`space_id`, optional `folder_id`, `file`). |
 | `file_replace` | POST multipart | Update an existing file **without changing `file_id`** (`file_id`, `expected_sha256`, `file`). |
+| `file_update` | POST JSON | Rename/move by `file_id`, `name`, nullable `folder_id`. |
+| `folder_update` | POST JSON | Rename/move by `folder_id`, `name`, nullable `parent_id`. |
+| `file_delete` | POST JSON | Delete by `file_id`, after verified archive + journal. |
 
 - HTTPS is mandatory. Redirects are refused rather than following a URL with the bearer token.
 - Successful JSON responses must contain `ok: true`; HTTP 200 alone is insufficient.
@@ -152,13 +162,23 @@ The local state lives at:
 %USERPROFILE%\TelmiSync\MySpace\.telmi-sync-state.json
 ```
 
-(Or inside your configured `SYNC_DIR`.) It stores relative paths and last accepted **local** and **remote** SHA-256 values, using the same JSON field names as the macOS client. Updates are staged and replaced in the same local directory.
+(Or inside your configured `SYNC_DIR`.) Manifest v2 stores `files` keyed by remote file ID and `folders` keyed by remote folder ID, with their paths and local Windows identities. It also stores `scope` (server URL + space), `tombstones`, and `pending_deletes`. Updates are flushed, staged and atomically replaced in the same local directory.
+
+**Upgrade: keep the old JSON.** Back it up outside the sync directory, keep the existing task disabled while replacing the script, then run `--dry-run --verbose`. The existing path/two-hash manifest migrates automatically; a dry run migrates only in memory, and the real run saves v2. Local-to-server deletions are disabled during migration; if a previously tracked local file is already missing, migration stops. A preliminary `--pull` is optional. Existing Task Scheduler commands and script paths stay compatible.
+
+Local deletion archives the remote bytes under `.telmi-deleted/YYYY-MM-DD/<unique-id>/<original-path>`, flushes and verifies SHA-256, rechecks the server, saves a pending journal, then deletes remotely and verifies the old ID is absent. The archive directory is marked hidden on Windows and excluded recursively from sync. Archives are never automatically removed. Both configured deletion limits apply; the last remote file is protected.
+
+A timed-out deletion is not retried blindly. On a later run, a verified archive plus an absent remote ID completes the journal; if the ID still exists, the script stops for manual investigation. Do not clear the pending entry blindly. Old `remote_deleted` tombstones are cleaned up by removing their retained local files when still absent remotely; local-deletion tombstones prevent accidental resurrection.
+
+Remote deletion removes the identified local copy even if edited or renamed, without an archive or conflict copy. A completely empty remote inventory still hard-stops before any such deletion. On a dry-run whole-folder move, the script reports the move and defers subsequent file planning until that move can be applied.
+
+The API supports atomic `expected_sha256` only for replacement, not move/delete. Immediate preflight checks reduce races but cannot atomically prevent a concurrent server edit between the last check and metadata/delete POST.
 
 **Never delete the state file as routine troubleshooting.** The state is needed to distinguish a genuinely new local file from one that was **previously synchronized and then deleted remotely**. Without this history, an old local copy can be mistaken for a new file and uploaded again.
 
 The state file is not shared between Windows and macOS machines. Each PC maintains its own local three-way comparison baseline. Preserve the local state when recovering/migrating a machine, and never point two separate installations at the same local sync directory/state file without a deliberate migration plan.
 
-Files with names beginning `.telmi-`, files containing `.conflict-`, `.DS_Store`, and the configured state file are excluded from local uploads. Do not intentionally use excluded names for files you want synchronized.
+Directories beginning `.telmi-` (including the complete archive subtree), files beginning `.telmi-`, files containing `.conflict-`, `.DS_Store`, and the configured state file are excluded from local uploads. Remote names that would be excluded are rejected. Do not intentionally use excluded names for files you want synchronized.
 
 ## 8. Logging and process locking
 
@@ -188,13 +208,13 @@ Illustrative example; paths and counts depend on the selected space:
 2026-11-02T10:00:02+01:00 LIST Notes: 0 folders, 1 files
 2026-11-02T10:00:03+01:00 LIST Projects/Reports: 0 folders, 1 files
 2026-11-02T10:00:03+01:00 Remote inventory validated: 5 files, 4 folders
-2026-11-02T10:00:03+01:00 Plan: 5 actions, 0 previously-synced remote deletions
+2026-11-02T10:00:03+01:00 Plan: 5 actions; archive_deletes=0
 2026-11-02T10:00:03+01:00 DOWNLOAD Projects/Reports/summary.md (dry-run)
 ...
-2026-11-02T10:00:03+01:00 telmi-files-sync done: folders=4 downloads=5 uploads=0 conflicts=0 skipped=0 errors=0
+2026-11-02T10:00:03+01:00 telmi-files-sync done: folders=4 downloads=5 uploads=0 conflicts=0 skipped=0 moves=0 deletes=0 local_deletes=0 errors=0
 ```
 
-A root directory counts as a folder in the summary. `UPLOAD` means create, `REPLACE` means update the same remote file ID, `CONFLICT-SERVER-WINS` means preserve a divergent local copy, and `ADOPT` means hashes already match but need recording in state.
+`MOVE-LOCAL`, `MOVE-REMOTE-FILE`, and `MOVE-REMOTE-FOLDER` describe moves. `ARCHIVE+DELETE-REMOTE` previews an archive-first deletion, `DELETE-REMOTE` confirms it, and `DELETE-LOCAL` reports direct server-driven deletion. A root directory counts as a folder in the summary. `UPLOAD` means create, `REPLACE` means update the same remote file ID, `CONFLICT-SERVER-WINS` means preserve a divergent local copy, and `ADOPT` means hashes already match but need recording in state.
 
 ## 10. Recommended first-time rollout
 
@@ -205,7 +225,8 @@ A root directory counts as a folder in the summary. `UPLOAD` means create, `REPL
 5. Run another `--dry-run --verbose` and review proposed `UPLOAD`/`REPLACE` actions.
 6. Create a **disposable local test file**, run the two-way sync, edit it, and verify that a subsequent run uses `REPLACE` rather than creating a duplicate server file.
 7. Simulate a conflict with a disposable file. Confirm the server bytes win and the divergent local copy is retained as a `.conflict-...` file.
-8. Only then turn on scheduled automatic two-way sync.
+8. Test file/folder moves and both deletion directions using disposable files while retaining an anchor file on the server. Verify IDs survive moves, local deletion has an exact archive, and remote deletion has none. Confirm an empty server aborts.
+9. Only then turn on scheduled automatic two-way sync.
 
 A successful dry run proves **inventory and planning**, not actual transfer reliability. Windows API integration should be tested using disposable files before syncing business-critical data.
 
@@ -315,16 +336,16 @@ Check NTFS permissions, open documents holding an exclusive handle, ransomware p
 
 Check whether the state file was lost or whether a new client was paired to an existing local directory without the original history. **Do not delete state to troubleshoot this.** Remote deletion tracking is state-dependent.
 
-## 13. Files Sync guide
+## 13. Mantis Bat Files Sync guide
 
-The Mantis Bat Files Sync page provides this client and a guided setup walkthrough. The page is a static guide; the actual synchronization runs locally on Windows, manually or through Task Scheduler. It is not an HTTP service and does not let a Ghost run arbitrary Windows commands.
+The no-auth Mantis Bat Files Sync page hosts this guide and the text-safe script download. Hades serves the guide; the client runs **locally on Windows** with the configured Ghost JWT. The page does not receive credentials, synchronize files on the web server, or allow a Ghost to run arbitrary Windows commands. An immediate remote trigger would require a separate authenticated local agent or outbound polling mechanism.
 
-Treat every connection as a pairing of deployment URL, Ghost credential, space ID, local directory, state, and lock. Do not put live credentials or customer identifiers in distributed scripts or examples.
+For reusable customer installations, treat every connection as a pairing of **deployment URL + Ghost credential + space ID + local directory + state + lock**. Do not embed customer/group/person names, internal project identifiers, or live tokens in distributed scripts or examples.
 
 ## 14. Compatibility and testing notes
 
 This guide documents the Windows PowerShell client and the public Ghost API v2 Files operations available in November 2026. The implementation aims to match the macOS script's three-way sync and server-wins semantics, but it is a **separate Windows implementation**, not a line-for-line Bash translation.
 
-It does not offer server-side pagination, atomic rollback of a whole sync run, remote deletion propagation, automatic OS-level rename tracking, or remote PC execution.
+It does not offer server-side pagination, atomic rollback of a whole run, atomic server move/delete preconditions, empty-folder deletion propagation, or remote PC execution.
 
-**Validation status:** API routes and request formats were checked against the published OpenAPI schema. The script has not been executed against an actual Windows host or an authenticated customer Files space as part of this handoff. Verify its behavior with a dry run and disposable test files before enabling Task Scheduler for production data.
+**Validation status:** API routes and request formats were checked against the published OpenAPI schema. PowerShell parsing, native identity-helper C# compilation, mocked move/deletion planning, and filesystem-backed mocked transfers/state migration were checked using PowerShell 7 on macOS. These checks cover both deletion directions, archives and journal completion, dry-run/push/pull behavior, server renames, and the empty-server hard stop. Native Windows handle behavior still requires a Windows integration run. The script has not been executed against an actual Windows host or an authenticated customer Files space as part of this handoff. Verify its behavior with a dry run and disposable test files before enabling Task Scheduler for production data.

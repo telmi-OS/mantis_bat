@@ -11,12 +11,12 @@ This module does not sync files on the web server, run a background worker, or a
 - `public/index.php` — guided flow with **Guided** and **Read all** views
 - `public/downloads/telmi-files-sync.sh.txt` — macOS Bash/Python client; rename to `.sh` after downloading
 - `public/downloads/telmi-files-sync-windows.ps1.txt` — Windows PowerShell client; rename to `.ps1` after downloading
-- `public/downloads/TELMI-FILES-SYNC-MACOS.md` — full macOS reference
+- `public/downloads/telmi-files-sync-macos-guide.md` — full macOS reference
 - `public/downloads/telmi-files-sync-windows-guide.md` — full Windows reference
 - `src/Config.php` — optional display configuration adapter, with safe defaults
 - `storage/config.example.php` — title, timezone, and optional start/end image paths
 
-The client scripts are text-suffixed for safe HTTPS transfer. They contain generic placeholders, not a deployment URL, space ID, or credential. Each user configures a copy locally. A Ghost JWT is never sent to or stored by this web page.
+The client scripts are text-suffixed for safe HTTPS transfer. They contain generic placeholders, not a deployment URL, space ID, or credential. Each user configures a copy locally. A Ghost JWT is never sent to or stored by this web page. The updated macOS client ships with the same generic configuration as Windows rather than the development URL or a customer-specific folder.
 
 ## Requirements
 
@@ -43,7 +43,9 @@ The defaults in `src/Config.php` pick them up automatically when present. A host
 
 ## Sync behavior shown in the guide
 
-The clients recursively compare one remote Files space against one local directory. They download new or changed server files, upload new local files, and use `file_replace` to update an existing remote file. If both copies changed, **server wins** and the divergent local copy is retained beside the active file. The scripts do not call file-delete or folder-delete API actions. Preserve `.telmi-sync-state.json`; it tracks prior syncs and remote deletions.
+The v6 clients recursively compare one remote Files space against one local directory using a version 2 identity manifest. Renames and moves preserve remote file or folder IDs when the local filesystem can identify the move. They download new or changed server files, upload new local files, and use `file_replace` to update an existing remote file. If both copies changed, **server wins** and the divergent local copy is retained beside the active file.
+
+File deletions propagate for previously synchronized files. When a tracked local file is deleted and the server copy is unchanged, the client downloads and verifies the server bytes into `.telmi-deleted/` before calling `file_delete`; if the server copy changed, server wins and is restored. The archive is excluded from sync and never cleaned automatically. A remote deletion removes the tracked local copy directly, without an archive, including local edits. `--pull` never deletes server files; `--push` defers applying remote deletions locally. Empty folder deletion is not propagated. The clients cap local-to-server deletions per run and protect the last remote file, but users must inspect dry-run deletion actions and test on disposable content before scheduling. Preserve `.telmi-sync-state.json`; it tracks IDs, paths, content hashes, moves, tombstones and pending delete operations.
 
 Both clients fail closed on API, inventory, path, integrity, or transfer errors. The Files listing API has no pagination metadata, so a listing that reaches its configured limit is ambiguous and stops. The full remote inventory must contain at least one file. Mutating API calls are not automatically retried, and a hard stop does not roll back transfers that already completed earlier in the same run.
 
@@ -52,7 +54,7 @@ Both clients fail closed on API, inventory, path, integrity, or transfer errors.
 From the repository root, create a Hades-ready archive with:
 
 ```bash
-tools/files-sync/php/scripts/package-release.sh 1.0.0
+tools/files-sync/php/scripts/package-release.sh 1.1.0
 ```
 
 The archive includes the optional config example and both text-safe client downloads, but excludes any live `storage/config.php`.

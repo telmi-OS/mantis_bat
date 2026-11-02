@@ -1,30 +1,13 @@
 #!/bin/bash
-# telmi-files-sync.sh — fail-closed macOS <-> telmi OS Files sync (Ghost API v2).
-#
-# Usage (unchanged):
-#   ./telmi-files-sync.sh [--dry-run] [--pull] [--push] [--verbose]
-#   --pull / --push are mutually exclusive; no mode means both directions.
-#   --dry-run plans only; it never modifies the sync folder or server.
-#
-# Server wins if both sides changed (a timestamped local conflict copy is kept).
-# Updates use atomic file_replace (file_id + expected_sha256); never upload.
-# Remote deletions are NEVER re-uploaded. Local deletions are re-downloaded.
-# No deletes are propagated. An empty or incomplete remote file inventory aborts.
-# The public Files list API has NO cursor/offset/has_more; a listing that
-# reaches its independent folder/file limit is ambiguous and MUST abort.
-# Any HTTP/API/validation/transfer/state failure aborts with a nonzero exit code.
-#
-# Requirements: macOS bash 3.2+, python3, curl. No pip dependencies.
-# Install: chmod 700 telmi-files-sync.sh
-# Secret: export TELMI_GHOST_JWT='...' (or set it below). NEVER commit a JWT.
-# Cron logging: /path/telmi-files-sync.sh >> "$HOME/telmi-files-sync.log" 2>&1
-
+# telmi-files-sync.sh — identity-aware, archive-first macOS Files sync.
+# Commands: --dry-run, --pull, --push, --verbose. Defaults to two-way.
+# 2-way moves/renames preserve file_id/folder_id. Server wins.
+# Local deletion: archive verified remote bytes, journal, then file_delete.
+# Remote deletion: delete tracked local copies directly, without an archive.
+# Ghost API file_delete has no atomic checksum precondition: concurrent writes
+# between final GET and POST remain a backend limitation.
 set -euo pipefail
 umask 077
-
-# -----------------------------------------------------------------------------
-# CONFIGURATION. Environment variables may override every setting below.
-# -----------------------------------------------------------------------------
 export TELMI_GHOST_JWT="${TELMI_GHOST_JWT:-PASTE_YOUR_GHOST_JWT_HERE}"
 export TELMI_BASE_URL="${TELMI_BASE_URL:-https://YOUR-TELMI-HOST.example}"
 export TELMI_SPACE_ID="${TELMI_SPACE_ID:-PASTE_YOUR_SPACE_ID_HERE}"
@@ -32,22 +15,21 @@ export SYNC_DIR="${SYNC_DIR:-$HOME/TelmiSync/MySpace}"
 export STATE_FILE="${STATE_FILE:-.telmi-sync-state.json}"
 export LOCK_DIR="${LOCK_DIR:-$HOME/.telmi-files-sync.lock}"
 export LOCK_STALE_MINUTES="${LOCK_STALE_MINUTES:-360}"
-export HTTP_RETRIES="${HTTP_RETRIES:-3}"  # read-only GETs only
+export HTTP_RETRIES="${HTTP_RETRIES:-3}"
 export HTTP_RETRY_SLEEP="${HTTP_RETRY_SLEEP:-3}"
 export LIST_PAGE_SIZE="${LIST_PAGE_SIZE:-500}"
 export MAX_FOLDER_DEPTH="${MAX_FOLDER_DEPTH:-32}"
 export CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-15}"
 export CURL_READ_TIMEOUT="${CURL_READ_TIMEOUT:-120}"
 export CURL_TRANSFER_TIMEOUT="${CURL_TRANSFER_TIMEOUT:-3600}"
-
-command -v python3 >/dev/null 2>&1 || { echo 'ERROR python3 is required' >&2; exit 1; }
-command -v curl >/dev/null 2>&1 || { echo 'ERROR curl is required' >&2; exit 1; }
-
-# All changes, networking and state management happen in this single Python
-# process; a Bash/Python split formerly hid failures inside command substitutions.
+export MAX_LOCAL_DELETES_PER_RUN="${MAX_LOCAL_DELETES_PER_RUN:-10}"
+export MAX_LOCAL_DELETE_PERCENT="${MAX_LOCAL_DELETE_PERCENT:-25}"
+command -v python3 >/dev/null || { echo 'ERROR python3 required' >&2; exit 1; }
+command -v curl >/dev/null || { echo 'ERROR curl required' >&2; exit 1; }
 exec python3 - "$@" <<'PY'
 import argparse
 import datetime as dt
+import errno
 import hashlib
 import json
 import os
@@ -406,426 +388,958 @@ class Client:
         return (reported or "").lower()
 
 
+    def update_file(self, file_id, name, folder_id):
+        return self.data(self.request('POST', self.endpoint(action='file_update'),
+                         body={'file_id': file_id, 'name': name, 'folder_id': folder_id or None}))
+
+    def update_folder(self, folder_id, name, parent_id):
+        return self.data(self.request('POST', self.endpoint(action='folder_update'),
+                         body={'folder_id': folder_id, 'name': name, 'parent_id': parent_id or None}))
+
+    def delete_file(self, file_id):
+        return self.data(self.request('POST', self.endpoint(action='file_delete'),
+                         body={'file_id': file_id}))
+
+# Manifest v2 deliberately separates remote object identity from its path.
+# Rename/move is a metadata operation; deletion is a separate, archived operation.
+# Manifest v2 deliberately separates remote object identity from its path.
+# Rename/move is a metadata operation; deletion is a separate, archived operation.
+# Manifest v2 deliberately separates remote object identity from its path.
+# Rename/move is a metadata operation; deletion is a separate, archived operation.
+# Manifest v2 deliberately separates remote object identity from its path.
+# Rename/move is a metadata operation; deletion is a separate, archived operation.
+# Manifest v2 deliberately separates remote object identity from its path.
+# Rename/move is a metadata operation; deletion is a separate, archived operation.
+# Manifest v2 deliberately separates remote object identity from its path.
+# Rename/move is a metadata operation; deletion is a separate, archived operation.
+ARCHIVE_DIR = '.telmi-deleted'
+
+
 class Synchronizer:
     def __init__(self, args, client, root, state_name, work, page_size, max_depth):
         self.args, self.client = args, client
         self.root = Path(root).absolute()
         self.state_path = self.root / state_name
         self.work = Path(work)
-        self.page_size = page_size
-        self.max_depth = max_depth
-        self.folders = {"": ""}  # relative directory path -> remote folder id
-        self.remote = {}         # relative file path -> remote file record
-        self.state = {"files": {}}
-        self.counts = {"folders": 0, "downloads": 0, "uploads": 0,
-                       "conflicts": 0, "skipped": 0}
-        self.actions = []
-        self.remote_absent = []
+        self.page_size, self.max_depth = page_size, max_depth
+        self.folders = {'': ''}                 # remote path -> id
+        self.folder_by_id = {}                  # id -> record with path
+        self.remote = {}                        # path -> record
+        self.remote_by_id = {}                  # id -> record with path
+        self.local = {}
+        self.local_dirs = {}
+        self.state = {'version': 2, 'scope': {'space_id': client.space_id, 'base_url': client.base}, 'files': {}, 'folders': {},
+                      'tombstones': {}, 'pending_deletes': {}}
+        self.migrated = False
+        self.dry_folder_moves = False
+        self.force_restore_ids = set()
+        self.counts = {'folders': 0, 'downloads': 0, 'uploads': 0, 'moves': 0,
+                       'deletes': 0, 'local_deletes': 0, 'conflicts': 0, 'skipped': 0}
+        self.max_deletes = config_int('MAX_LOCAL_DELETES_PER_RUN', 1)
+        self.max_delete_pct = config_int('MAX_LOCAL_DELETE_PERCENT', 1)
 
     def local_path(self, rel):
         path = self.root
-        for component in rel.split("/"):
-            validate_name(component, "local path component")
+        if not rel:
+            return path
+        for component in rel.split('/'):
+            validate_name(component, 'local path component')
             path = path / component
-        # Refuse a symlink at ANY component: no redirection outside the tree.
-        ancestor = self.root
-        if ancestor.is_symlink():
-            abort(f"sync root is a symlink: {self.root}")
-        for part in rel.split("/"):
-            ancestor = ancestor / part
-            if ancestor.is_symlink():
-                abort(f"symlink in sync path, refusing: {ancestor}")
+            if path.is_symlink():
+                abort(f'symlink in sync path refused: {path}')
         return path
-
-    def load_state(self):
-        if not self.state_path.exists():
-            return
-        if self.state_path.is_symlink() or not self.state_path.is_file():
-            abort("state file is a symlink or not a regular file")
-        try:
-            with self.state_path.open(encoding="utf-8") as f:
-                raw = json.load(f)
-        except (OSError, ValueError) as exc:
-            abort(f"cannot parse state file {self.state_path}: {exc}")
-        if not isinstance(raw, dict) or not isinstance(raw.get("files"), dict):
-            abort("state JSON has invalid structure")
-        for name, pair in raw["files"].items():
-            if not isinstance(name, str) or not name or name.startswith("/"):
-                abort("state contains unsafe path")
-            for comp in name.split("/"):
-                validate_name(comp, "state")
-            if (not isinstance(pair, dict) or
-                not all(is_sha(pair.get(k)) for k in ("remote_sha256", "local_sha256"))):
-                abort(f"state entry for {name!r} is malformed")
-        self.state = raw
 
     def save_state(self):
         if self.args.dry_run:
             return
-        self.local_path(self.state_path.name)
         self.root.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix=".telmi-state-", dir=self.root)
+        if self.state_path.is_symlink():
+            abort('manifest is a symlink')
+        fd, temp_name = tempfile.mkstemp(prefix='.telmi-state-', dir=str(self.root))
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self.state, f, indent=2, sort_keys=True)
-                f.write("\n")
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self.state_path)
-        except OSError as exc:
-            abort(f"state write FAILED: {exc}")
+            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+                json.dump(self.state, stream, sort_keys=True, indent=2)
+                stream.write('\n')
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_name, self.state_path)
+            self.sync_dir(self.root)
         finally:
-            if os.path.lexists(tmp):
-                os.unlink(tmp)
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
 
-    def set_state(self, rel, remote_sha, local_sha):
-        self.state["files"][rel] = {
-            "remote_sha256": remote_sha, "local_sha256": local_sha}
-        self.save_state()
+    _dir_sync_warned = False
+
+    @staticmethod
+    def sync_dir(path):
+        # fsync directories on macOS to persist archive/manifest metadata.
+        try:
+            fd = os.open(str(path), os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except OSError as exc:
+            # Some macOS filesystems do not support fsync() on directories.
+            # Archive FILE contents are fsynced and verified separately.
+            if sys.platform == 'darwin' and exc.errno in (errno.EINVAL, errno.ENOTSUP, errno.EBADF):
+                if not Synchronizer._dir_sync_warned:
+                    log('WARN filesystem does not support directory fsync; metadata crash durability cannot be guaranteed')
+                    Synchronizer._dir_sync_warned = True
+                return
+            abort(f'cannot fsync directory {path}: {exc}')
+
+    def load_state(self):
+        if self.state_path.is_symlink():
+            abort('manifest is a symlink')
+        if not self.state_path.exists():
+            return
+        try:
+            with self.state_path.open(encoding='utf-8') as stream:
+                data = json.load(stream)
+        except (ValueError, OSError) as exc:
+            abort(f'cannot read sync manifest: {exc}')
+        if not isinstance(data, dict):
+            abort('invalid sync manifest')
+        if data.get('version') == 2:
+            for key in ('scope', 'files', 'folders', 'tombstones', 'pending_deletes'):
+                if not isinstance(data.get(key), dict):
+                    abort(f'invalid manifest section {key}')
+            expected = {'space_id': self.client.space_id, 'base_url': self.client.base}
+            if data['scope'] != expected:
+                abort('manifest belongs to a different Telmi server or Files space')
+            for file_id, record in data['files'].items():
+                self.validate_record(file_id, record, 'file')
+            for folder_id, record in data['folders'].items():
+                self.validate_record(folder_id, record, 'folder')
+            for path, record in data['tombstones'].items():
+                self.validate_rel(path)
+                if not isinstance(record, dict) or record.get('reason') not in ('remote_deleted', 'local_deleted'):
+                    abort('invalid tombstone')
+            for file_id, record in data['pending_deletes'].items():
+                self.validate_record(file_id, record, 'pending')
+                archive = record.get('archive')
+                if not isinstance(archive, str) or not archive.startswith(ARCHIVE_DIR + '/'):
+                    abort('invalid pending delete archive')
+                self.validate_archive_rel(archive)
+            self.state = data
+        elif isinstance(data.get('files'), dict):
+            # Legacy v4 path + two-hash state is upgraded in memory AFTER remote
+            # inventory validation. First upgrade run cannot issue deletions.
+            self.legacy = data
+            self.migrated = True
+            log('INFO legacy manifest detected: identity migration enabled; delete disabled for first run')
+        else:
+            abort('unrecognized/corrupt sync manifest')
+
+    def validate_rel(self, rel):
+        if not isinstance(rel, str) or not rel or rel.startswith('/'):
+            abort(f'unsafe manifest path {rel!r}')
+        for c in rel.split('/'):
+            validate_name(c, 'manifest path')
+        if rel == self.state_path.name or rel == ARCHIVE_DIR or rel.startswith(ARCHIVE_DIR + '/'):
+            abort(f'reserved manifest path {rel!r}')
+
+    def validate_archive_rel(self, rel):
+        if not isinstance(rel, str) or not rel.startswith(ARCHIVE_DIR + '/'):
+            abort('unsafe archive path')
+        for part in rel.split('/'):
+            validate_name(part, 'archive path')
+
+    def validate_record(self, object_id, record, kind):
+        if not isinstance(object_id, str) or not object_id or not isinstance(record, dict):
+            abort(f'invalid {kind} manifest record')
+        self.validate_rel(record.get('path'))
+        if kind != 'folder' and not is_sha(record.get('sha256')):
+            abort(f'invalid hash in {kind} record {object_id}')
+        for field in ('dev', 'ino'):
+            value = record.get(field)
+            if value is not None and (not isinstance(value, int) or value < 0):
+                abort(f'invalid {kind} identity {field}')
+
+    @staticmethod
+    def identity(stat):
+        return {'dev': stat.st_dev, 'ino': stat.st_ino}
+
+    @staticmethod
+    def same_identity(record, cur):
+        return (record.get('dev') is not None and record.get('ino') is not None and
+                record['dev'] == cur['dev'] and record['ino'] == cur['ino'])
+
+    def scan_local(self):
+        files, folders, folded = {}, {}, {}
+        if not self.root.exists():
+            self.local, self.local_dirs = files, folders
+            return
+        if self.root.is_symlink() or not self.root.is_dir():
+            abort('sync root must be a normal directory')
+        def walk_error(e):
+            abort(f'cannot enumerate sync folder: {e}')
+        for base, dirs, names in os.walk(self.root, followlinks=False, onerror=walk_error):
+            rel_base = Path(base).relative_to(self.root).as_posix()
+            if rel_base == '.':
+                rel_base = ''
+            for name in list(dirs):
+                rel = rel_base + '/' + name if rel_base else name
+                if rel == ARCHIVE_DIR:
+                    dirs.remove(name)
+                    if (Path(base) / name).is_symlink():
+                        abort('archive directory is a symlink')
+                    continue
+                validate_name(name, 'local directory')
+                if name.startswith('.telmi-'):
+                    # Other managed helper directories should never sync either.
+                    dirs.remove(name)
+                    continue
+                path = Path(base) / name
+                if path.is_symlink() or not path.is_dir():
+                    abort(f'local link/special directory refused: {path}')
+                key = canonical_path(rel)
+                if key in folded:
+                    abort(f'local case/Unicode collision: {rel} and {folded[key]}')
+                folded[key] = rel
+                folders[rel] = self.identity(path.stat())
+            for name in names:
+                rel = rel_base + '/' + name if rel_base else name
+                if rel == self.state_path.name or name == '.DS_Store' or name.startswith('.telmi-') or '.conflict-' in name:
+                    continue
+                validate_name(name, 'local file')
+                path = Path(base) / name
+                if path.is_symlink() or not path.is_file():
+                    abort(f'local symlink/special file refused: {path}')
+                key = canonical_path(rel)
+                if key in folded:
+                    abort(f'local case/Unicode collision: {rel} and {folded[key]}')
+                folded[key] = rel
+                record = self.identity(path.stat())
+                record['sha256'] = sha256_file(path)
+                files[rel] = record
+        self.local, self.local_dirs = files, folders
 
     def fetch_tree(self):
-        queue = [("", "", 0)]
-        folder_ids = set()
-        file_ids = set()
-        reserved = canonical_path(self.state_path.name)
-        seen_paths = {reserved: "[reserved sync state]"}
+        self.folders, self.folder_by_id = {'': ''}, {}
+        self.remote, self.remote_by_id = {}, {}
+        queue = [('', '', 0)]
+        seen_folder_ids = set()
+        seen_names = {canonical_path(self.state_path.name): '[sync manifest]',
+                      canonical_path(ARCHIVE_DIR): '[local deletion archive]'}
+        self.counts['folders'] = 0
         while queue:
-            path, folder_id, depth = queue.pop(0)
+            base, folder_id, depth = queue.pop(0)
             if depth > self.max_depth:
-                abort(f"maximum folder depth exceeded at {path!r}")
-            if folder_id in folder_ids:
-                abort(f"API returned repeated/cyclic folder_id {folder_id!r}")
-            folder_ids.add(folder_id)
-            folders, files = self.client.list_folder(folder_id, self.page_size)
-            self.counts["folders"] += 1
+                abort(f'maximum remote folder depth exceeded at {base}')
+            if folder_id in seen_folder_ids:
+                abort(f'repeated remote folder id {folder_id}')
+            seen_folder_ids.add(folder_id)
+            subfolders, files = self.client.list_folder(folder_id, self.page_size)
+            self.counts['folders'] += 1
             if self.args.verbose:
-                log(f"LIST {path or '/'}: {len(folders)} folders, {len(files)} files")
-            for entry in folders:
-                if not isinstance(entry, dict):
-                    abort(f"API list {path or '/'}: invalid folder record")
-                fid = entry.get("folder_id")
-                name = validate_name(entry.get("name"), "remote folder")
-                if not isinstance(fid, str) or not fid:
-                    abort(f"API list {path or '/'}: folder missing folder_id")
-                parent = entry.get("parent_id")
-                allowed_parents = (None, "", folder_id) if folder_id else (None, "", self.client.space_id)
-                if parent not in allowed_parents:
-                    abort(f"API list {path or '/'}: folder {name!r} has unexpected parent_id")
-                rel = f"{path}/{name}" if path else name
-                key = canonical_path(rel)
-                if key in seen_paths:
-                    abort(f"remote path collision {rel!r} vs {seen_paths[key]!r}")
-                seen_paths[key] = rel
-                if fid in folder_ids or any(q[1] == fid for q in queue):
-                    abort(f"remote folder ID repeated: {fid}")
-                self.folders[rel] = fid
-                queue.append((rel, fid, depth + 1))
-            for entry in files:
-                if not isinstance(entry, dict):
-                    abort(f"API list {path or '/'}: invalid file record")
-                fid = entry.get("file_id")
-                name = validate_name(entry.get("name"), "remote file")
-                sha = entry.get("sha256")
-                if not isinstance(fid, str) or not fid or fid in file_ids:
-                    abort(f"API list {path or '/'}: missing/duplicate file_id for {name!r}")
-                if not is_sha(sha):
-                    abort(f"API list {path or '/'}: missing/invalid sha256 for {name!r}")
-                parent = entry.get("folder_id")
-                allowed_parents = (None, "", folder_id) if folder_id else (None, "", self.client.space_id)
-                if parent not in allowed_parents:
-                    abort(f"API list {path or '/'}: file {name!r} has unexpected folder_id")
-                rel = f"{path}/{name}" if path else name
-                key = canonical_path(rel)
-                if key in seen_paths:
-                    abort(f"remote path collision {rel!r} vs {seen_paths[key]!r}")
-                seen_paths[key] = rel
-                file_ids.add(fid)
-                self.remote[rel] = {"file_id": fid, "sha": sha.lower(),
-                                    "folder_id": folder_id}
+                log(f'LIST {base or "/"}: {len(subfolders)} folders, {len(files)} files')
+            for folder in subfolders:
+                if not isinstance(folder, dict):
+                    abort('malformed remote folder record')
+                fid = folder.get('folder_id')
+                name = validate_name(folder.get('name'), 'remote folder')
+                if not isinstance(fid, str) or not fid or fid in self.folder_by_id:
+                    abort(f'duplicate/missing remote folder id in {base}')
+                if folder.get('parent_id') not in ((None, '', self.client.space_id) if not folder_id else (None, '', folder_id)):
+                    abort('remote folder parent mismatch')
+                path = base + '/' + name if base else name
+                self.unique_remote_path(path, seen_names)
+                self.folders[path] = fid
+                self.folder_by_id[fid] = {'path': path, 'parent_id': folder_id}
+                queue.append((path, fid, depth + 1))
+            for item in files:
+                if not isinstance(item, dict):
+                    abort('malformed remote file record')
+                fid = item.get('file_id')
+                name = validate_name(item.get('name'), 'remote file')
+                sha = item.get('sha256')
+                if not isinstance(fid, str) or not fid or fid in self.remote_by_id or not is_sha(sha):
+                    abort('invalid/duplicate remote file id or hash')
+                if item.get('folder_id') not in ((None, '', self.client.space_id) if not folder_id else (None, '', folder_id)):
+                    abort('remote file parent mismatch')
+                path = base + '/' + name if base else name
+                self.unique_remote_path(path, seen_names)
+                rec = {'file_id': fid, 'path': path, 'sha256': sha.lower(), 'folder_id': folder_id}
+                self.remote_by_id[fid] = rec
+                self.remote[path] = rec
         if not self.remote:
-            abort("remote inventory contains ZERO FILES; hard abort, no sync attempted")
-        log(f"Remote inventory validated: {len(self.remote)} files, {self.counts['folders']} folders")
+            abort('remote inventory contains ZERO FILES; HARD STOP')
+        log(f'Remote inventory validated: {len(self.remote)} files, {self.counts["folders"]} folders')
 
-    def local_files(self):
-        if not self.root.exists():
-            return {}
-        if self.root.is_symlink() or not self.root.is_dir():
-            abort("sync root is not a normal directory")
-        found = {}
-        case_map = {}
-        def walk_error(exc):
-            abort(f"cannot traverse local directory: {exc}")
-        for base, dirs, files in os.walk(self.root, followlinks=False,
-                                         onerror=walk_error):
-            for name in dirs + files:
-                validate_name(name, "local")
-                absolute = Path(base) / name
-                if absolute.is_symlink():
-                    abort(f"local symlink refused: {absolute}")
-                rel = absolute.relative_to(self.root).as_posix()
-                key = canonical_path(rel)
-                if key in case_map:
-                    abort(f"local case/Unicode collision: {rel!r}, {case_map[key]!r}")
-                case_map[key] = rel
-            for name in files:
-                absolute = Path(base) / name
-                if not absolute.is_file():
-                    abort(f"local non-regular file refused: {absolute}")
-                rel = absolute.relative_to(self.root).as_posix()
-                if rel == self.state_path.name or name == ".DS_Store" or name.startswith(".telmi-") or ".conflict-" in name:
-                    continue
-                found[rel] = sha256_file(absolute)
-        return found
+    @staticmethod
+    def unique_remote_path(path, seen):
+        for part in path.split('/'):
+            if (part.startswith('.telmi-') or part == '.DS_Store' or
+                '.conflict-' in part):
+                abort(f'remote name would be excluded locally and cannot be safely synchronized: {path!r}')
+        key = canonical_path(path)
+        if key in seen:
+            abort(f'remote name collision: {path!r} and {seen[key]!r}')
+        seen[key] = path
 
-    def preflight(self):
-        self.load_state()
-        self.fetch_tree()  # entire listing MUST succeed before any write
-        local = self.local_files()
-        remote_paths = set(self.remote)
-        remote_case_index = {canonical_path(p): p for p in (*self.remote.keys(), *self.folders.keys())}
-        for rel in local:
-            normalized = canonical_path(rel)
-            if normalized in remote_case_index and remote_case_index[normalized] != rel:
-                abort(f"local and remote path differ only by case/Unicode: {rel!r} vs {remote_case_index[normalized]!r}")
-        for rel, remote in sorted(self.remote.items()):
-            path = self.local_path(rel)
-            if rel not in local:
-                if path.exists() and not path.is_file():
-                    abort(f"remote file conflicts with local directory: {rel}")
-                if self.args.mode != "push":
-                    self.actions.append(("download", rel, None))
-                else:
-                    self.counts["skipped"] += 1
-                continue
-            lsha, rsha = local[rel], remote["sha"]
-            state = self.state["files"].get(rel)
-            if rsha == lsha:
-                if not state or state["remote_sha256"] != rsha or state["local_sha256"] != lsha:
-                    self.actions.append(("adopt", rel, lsha))
-                continue
-            # New-to-client file present on both sides: server wins, ALWAYS.
-            rchanged = not state or state["remote_sha256"] != rsha
-            lchanged = not state or state["local_sha256"] != lsha
-            if rchanged and lchanged:
-                if self.args.mode != "push":
-                    self.actions.append(("conflict", rel, lsha))
-                else:
-                    self.counts["skipped"] += 1
-            elif rchanged:
-                if self.args.mode != "push":
-                    self.actions.append(("download", rel, lsha))
-                else:
-                    self.counts["skipped"] += 1
-            elif lchanged:
-                if self.args.mode != "pull":
-                    self.actions.append(("upload", rel, lsha))
-                else:
-                    self.counts["skipped"] += 1
+    def migrate_legacy(self):
+        if not self.migrated:
+            return
+        upgraded = {'version': 2,
+                    'scope': {'space_id': self.client.space_id, 'base_url': self.client.base},
+                    'files': {}, 'folders': {}, 'tombstones': {}, 'pending_deletes': {}}
+        for path, pair in self.legacy['files'].items():
+            self.validate_rel(path)
+            if not isinstance(pair, dict) or not is_sha(pair.get('remote_sha256')) or not is_sha(pair.get('local_sha256')):
+                abort('legacy manifest contains malformed hash')
+            r = self.remote.get(path)
+            l = self.local.get(path)
+            if r:
+                if l is None:
+                    # First upgrade cannot interpret an old-path absence as a
+                    # deletion, because the old state lacked stable identity.
+                    abort(f'legacy migration blocked: previously synced local file {path!r} missing; restore it or run old client once before upgrading')
+                new = {'path': path, 'sha256': pair['remote_sha256'].lower(),
+                       'dev': l['dev'], 'ino': l['ino']}
+                upgraded['files'][r['file_id']] = new
             else:
-                # Should never happen with valid hashes and state.
-                abort(f"inconsistent sync state for {rel}")
-        for rel, lsha in sorted(local.items()):
-            if rel in remote_paths:
-                continue
-            if rel in self.state["files"]:
-                # Historical remote file was deleted. KEEP local, don't resurrect.
-                self.remote_absent.append(rel)
-                self.counts["skipped"] += 1
-                continue
-            # Prevent case-fold alias with any remote path or remote directory.
-            key = canonical_path(rel)
-            if key in remote_case_index:
-                abort(f"local file collides with remote path: {rel}")
-            if self.args.mode != "pull":
-                self.actions.append(("upload_new", rel, lsha))
-            else:
-                self.counts["skipped"] += 1
-        # Local file sitting where a remote directory must be created.
-        for folder in self.folders:
-            if folder and folder in local:
-                abort(f"local file blocks remote folder: {folder}")
-        # No side effects during preflight (including on dry-run).
-        log(f"Plan: {len(self.actions)} actions, {len(self.remote_absent)} previously-synced remote deletions")
+                upgraded['tombstones'][path] = {'reason': 'remote_deleted',
+                                                'sha256': pair['remote_sha256'].lower()}
+        for fid, rec in self.folder_by_id.items():
+            l = self.local_dirs.get(rec['path'], {})
+            upgraded['folders'][fid] = {'path': rec['path'], 'dev': l.get('dev'), 'ino': l.get('ino')}
+        self.state = upgraded
+        log(f'INFO migrated legacy manifest to v2 in memory: {len(upgraded["files"])} tracked file IDs')
 
-    def current_remote_match(self, rel, expected):
-        folder_rel = rel.rpartition("/")[0]
-        folder_id = self.folders.get(folder_rel)
-        if folder_id is None:
-            abort(f"unknown remote parent folder for {rel}")
-        _, entries = self.client.list_folder(folder_id, self.page_size)
-        name = rel.rpartition("/")[2]
-        matches = [e for e in entries if isinstance(e, dict) and e.get("name") == name]
+    def get_identified(self, record, source, oldpath):
+        matches = [path for path, item in source.items() if self.same_identity(record, item)]
         if len(matches) > 1:
-            abort(f"remote duplicate name for {rel}: refusing upload")
-        if expected is None:
-            if matches:
-                abort(f"remote file appeared since inventory: {rel}; aborting to preserve server")
-        else:
-            if not matches or matches[0].get("file_id") != expected["file_id"] or matches[0].get("sha256", "").lower() != expected["sha"]:
-                abort(f"remote file changed since inventory: {rel}; aborting to preserve server")
+            abort(f'one filesystem identity at multiple paths: {matches}')
+        if matches:
+            return matches[0]
+        # Replaced local files at the same path retain their logical path,
+        # even when editors change their inode via atomic save.
+        if oldpath in source:
+            return oldpath
+        return None
+
+    def update_paths_after_folder_move(self, old, new):
+        def rewrite(path):
+            if path == old:
+                return new
+            if path.startswith(old + '/'):
+                return new + path[len(old):]
+            return path
+        for category in ('files', 'folders'):
+            for rec in self.state[category].values():
+                rec['path'] = rewrite(rec['path'])
+        new_tombstones = {}
+        for path, val in self.state['tombstones'].items():
+            key = rewrite(path)
+            if key in new_tombstones:
+                abort('folder rename caused tombstone collision')
+            new_tombstones[key] = val
+        self.state['tombstones'] = new_tombstones
+
+    def local_move(self, src, dest, is_dir):
+        if src == dest:
+            return
+        sp, dp = self.local_path(src), self.local_path(dest)
+        if not sp.exists() or sp.is_symlink():
+            abort(f'remote move source disappeared locally: {src}')
+        if dp.exists() or dp.is_symlink():
+            abort(f'remote move destination occupied: {dest}; HARD STOP')
+        if self.args.dry_run:
+            log(f'MOVE-LOCAL {src} -> {dest} (dry-run)')
+            return
+        dp.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(sp, dp)
+        log(f'MOVE-LOCAL {src} -> {dest}')
+        self.counts['moves'] += 1
+
+    def recheck_folder(self, fid, expected_path):
+        self.fetch_tree()
+        now = self.folder_by_id.get(fid)
+        if not now or now['path'] != expected_path:
+            abort(f'remote folder changed concurrently: {expected_path}')
+
+    def recheck_file(self, fid, path, sha):
+        # Read the complete immediate folder again, checking exact id/name/hash.
+        parent = path.rpartition('/')[0]
+        parent_id = self.folders.get(parent)
+        if parent_id is None:
+            abort(f'missing remote parent {parent}')
+        _, entries = self.client.list_folder(parent_id, self.page_size)
+        hits = [e for e in entries if isinstance(e, dict) and e.get('file_id') == fid]
+        if len(hits) != 1 or hits[0].get('name') != path.rpartition('/')[2] or hits[0].get('sha256', '').lower() != sha:
+            abort(f'remote file changed concurrently: {path}; server wins')
 
     def ensure_remote_folder(self, rel):
+        if not rel:
+            return ''
         if rel in self.folders:
             return self.folders[rel]
-        parent, _, name = rel.rpartition("/")
+        parent, _, name = rel.rpartition('/')
         parent_id = self.ensure_remote_folder(parent)
-        # Check for concurrent creation before POST (fail closed).
         children, _ = self.client.list_folder(parent_id, self.page_size)
-        matches = [d for d in children if isinstance(d, dict) and d.get("name") == name]
-        if matches:
-            abort(f"remote folder appeared since inventory: {rel}; rerun sync")
+        if any(item.get('name') == name for item in children):
+            abort(f'remote destination appeared concurrently: {rel}')
+        if self.args.dry_run:
+            log(f'MKDIR-REMOTE {rel}/ (dry-run)')
+            return ''
         fid = self.client.create_folder(name, parent_id)
         self.folders[rel] = fid
-        log(f"MKDIR-REMOTE {rel}/")
+        self.folder_by_id[fid] = {'path': rel, 'parent_id': parent_id}
+        l = self.local_dirs.get(rel, {})
+        self.state['folders'][fid] = {'path': rel, 'dev': l.get('dev'), 'ino': l.get('ino')}
+        self.save_state()
+        log(f'MKDIR-REMOTE {rel}/')
         return fid
 
-    def create_local_dirs(self):
-        for rel in sorted(self.folders, key=lambda x: (x.count("/"), x)):
+    def run_folder_moves(self):
+        # One operation at a time, then rescan. Only known folder IDs qualify.
+        max_rounds = len(self.state['folders']) + 3
+        for _ in range(max_rounds):
+            self.fetch_tree()
+            self.scan_local()
+            changed = False
+            for fid, old in sorted(self.state['folders'].items(), key=lambda pair: pair[1]['path'].count('/')):
+                remote = self.folder_by_id.get(fid)
+                if not remote:
+                    continue  # Server deleted this folder; never recreate automatically.
+                rp, base = remote['path'], old['path']
+                lp = self.get_identified(old, self.local_dirs, base)
+                remote_changed = rp != base
+                local_changed = lp is not None and lp != base
+                if not remote_changed and not local_changed:
+                    # Record identity for older directory entries once matched.
+                    if lp in self.local_dirs and (old.get('ino') is None or old.get('dev') is None):
+                        old.update(self.identity_obj(self.local_dirs[lp]))
+                    continue
+                if remote_changed:
+                    if self.args.mode == 'push':
+                        continue
+                    if lp == base and old.get('ino') is not None and not self.same_identity(old, self.local_dirs[base]):
+                        abort(f'remote folder moved but local source was replaced: {base}; HARD STOP')
+                    if lp is None:
+                        self.force_restore_ids.update(fid2 for fid2, r in self.remote_by_id.items() if r['path'].startswith(rp + '/'))
+                    if lp is not None and lp != rp:
+                        # Directory move may involve its own new parent; never
+                        # overwrite an existing target tree implicitly.
+                        self.local_move(lp, rp, True)
+                    if not self.args.dry_run:
+                        self.update_paths_after_folder_move(base, rp)
+                        self.state['folders'][fid].update(self.local_dirs.get(rp, {}))
+                        self.save_state()
+                    else:
+                        self.dry_folder_moves = True
+                        log(f'FOLDER-SERVER-WINS {base} -> {rp} (dry-run)')
+                    changed = True
+                    break
+                # Local-only rename/move of a known directory.
+                if self.args.mode == 'pull':
+                    self.local_move(lp, base, True)
+                    if not self.args.dry_run:
+                        self.scan_local()
+                    changed = True
+                    break
+                if lp is None:
+                    continue
+                # Ignore destination nesting inside itself, unsupported cycles.
+                if lp.startswith(base + '/'):
+                    abort(f'folder cannot move into itself: {base} -> {lp}')
+                if self.args.dry_run:
+                    self.dry_folder_moves = True
+                    log(f'MOVE-REMOTE-FOLDER {base} -> {lp} id={fid} (dry-run)')
+                    # Dry-run cannot mutate a virtual tree; avoid further phases.
+                    continue
+                parent = lp.rpartition('/')[0]
+                parent_id = self.ensure_remote_folder(parent)
+                self.recheck_folder(fid, base)
+                self.client.update_folder(fid, lp.rpartition('/')[2], parent_id)
+                self.fetch_tree()
+                if fid not in self.folder_by_id or self.folder_by_id[fid]['path'] != lp:
+                    abort(f'folder_update verification failed for {lp}')
+                self.update_paths_after_folder_move(base, lp)
+                self.save_state()
+                log(f'MOVE-REMOTE-FOLDER {base} -> {lp} (folder_id preserved)')
+                self.counts['moves'] += 1
+                changed = True
+                break
+            if not changed:
+                break
+        else:
+            abort('folder move detection did not converge')
+
+    @staticmethod
+    def identity_obj(rec):
+        return {'dev': rec['dev'], 'ino': rec['ino']}
+
+    def ensure_local_folders(self):
+        for rel in sorted(self.folders, key=lambda s: (s.count('/'), s)):
             if not rel:
                 continue
             path = self.local_path(rel)
-            if self.args.dry_run:
+            if path.exists():
                 if not path.is_dir():
-                    log(f"MKDIR {rel}/ (dry-run)")
+                    abort(f'remote directory blocked locally: {rel}')
                 continue
-            if not path.exists():
-                try:
-                    path.mkdir(parents=True, exist_ok=True)
-                except OSError as e:
-                    abort(f"mkdir {rel} failed: {e}")
+            if self.args.dry_run:
+                log(f'MKDIR {rel}/ (dry-run)')
+            else:
+                path.mkdir(parents=True, exist_ok=True)
                 if self.args.verbose:
-                    log(f"MKDIR {rel}/")
-            elif not path.is_dir():
-                abort(f"local path isn't a directory: {rel}")
+                    log(f'MKDIR {rel}/')
 
     def conflict_copy(self, rel, expected_sha):
-        src = self.local_path(rel)
-        if not src.is_file():
-            return  # Local file was removed after planning.
-        stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S")
-        sidecar = src.with_name(src.name + f".conflict-{stamp}-{os.getpid()}-{uuid.uuid4().hex[:8]}")
-        # Exclusive creation, never clobber an earlier conflict copy.
-        with src.open("rb") as inp, sidecar.open("xb") as out:
-            shutil.copyfileobj(inp, out, length=1024 * 1024)
-            out.flush()
-            os.fsync(out.fileno())
+        source = self.local_path(rel)
+        stamp = dt.datetime.now().strftime('%Y%m%dT%H%M%S')
+        sidecar = source.with_name(source.name + '.conflict-' + stamp + '-' + uuid.uuid4().hex[:8])
+        with source.open('rb') as src, sidecar.open('xb') as dest:
+            shutil.copyfileobj(src, dest, length=1024 * 1024)
+            dest.flush()
+            os.fsync(dest.fileno())
         if sha256_file(sidecar) != expected_sha:
-            abort(f"local file changed while preserving conflict {rel}; aborting")
-        log(f"CONFLICT-SERVER-WINS {rel} (local copy kept as {sidecar.name})")
-        self.counts["conflicts"] += 1
+            abort(f'conflict preservation checksum failure: {rel}')
+        log(f'CONFLICT-SERVER-WINS {rel} (saved as {sidecar.name})')
+        self.counts['conflicts'] += 1
 
-    def do_download(self, rel, conflict, planned_local_sha):
-        remote = self.remote[rel]
-        dest = self.local_path(rel)
+    def download(self, remote, local_path, planned_sha=None, force_conflict=False):
+        rel, fid, sha = remote['path'], remote['file_id'], remote['sha256']
         if self.args.dry_run:
-            log(f"{'CONFLICT-SERVER-WINS' if conflict else 'DOWNLOAD'} {rel} (dry-run)")
-            self.counts["downloads"] += 1
-            self.counts["conflicts"] += int(conflict)
+            log(f'DOWNLOAD {rel} (dry-run)')
+            self.counts['downloads'] += 1
             return
+        dest = self.local_path(rel)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        # Download into a separate staging file in the same filesystem.
-        tmp_fd, tmp_name = tempfile.mkstemp(prefix=".telmi-download-", dir=dest.parent)
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix='.telmi-dl-', dir=str(dest.parent))
         os.close(tmp_fd)
         try:
-            downloaded = self.client.download(remote["file_id"])
-            shutil.copyfile(downloaded, tmp_name)
-            got_sha = sha256_file(tmp_name)
-            if got_sha != remote["sha"]:
-                abort(f"download checksum mismatch for {rel}: expected={remote['sha']} got={got_sha}")
-            # Revalidate after transfer: do not replace local bytes with a
-            # server version superseded while the download was running.
-            self.current_remote_match(rel, remote)
-            # Catch modifications made while download was in progress. If a
-            # late local modification exists, preserve it before server wins.
-            current_sha = sha256_file(dest) if dest.is_file() else None
-            if dest.exists() and not dest.is_file():
-                abort(f"download destination became non-file: {rel}")
-            if current_sha and current_sha != got_sha:
-                if conflict or planned_local_sha != current_sha:
-                    self.conflict_copy(rel, current_sha)
-            elif conflict and current_sha:
-                # Local changed during the preflight but is now equal to server.
-                pass
-            if dest.is_symlink() or dest.parent.is_symlink():
-                abort(f"symlink appeared during download: {rel}")
-            os.replace(tmp_name, dest)
-            self.set_state(rel, got_sha, got_sha)
-            log(f"DOWNLOAD {rel}")
-            self.counts["downloads"] += 1
+            source = self.client.download(fid)
+            shutil.copyfile(source, tmp_path)
+            if sha256_file(tmp_path) != sha:
+                abort(f'download checksum mismatch for {rel}')
+            self.recheck_file(fid, rel, sha)
+            if dest.exists():
+                if not dest.is_file() or dest.is_symlink():
+                    abort(f'download destination is not a regular file: {rel}')
+                current = sha256_file(dest)
+                if current != sha and (force_conflict or current != planned_sha):
+                    self.conflict_copy(rel, current)
+            os.replace(tmp_path, dest)
+            cur = dest.stat()
+            self.state['files'][fid] = {'path': rel, 'sha256': sha, **self.identity(cur)}
+            self.state['tombstones'].pop(rel, None)
+            self.save_state()
+            log(f'DOWNLOAD {rel}')
+            self.counts['downloads'] += 1
         finally:
-            if os.path.lexists(tmp_name):
-                os.unlink(tmp_name)
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
-    def do_upload(self, rel, planned_sha, is_new):
+    def new_upload(self, rel, planned):
         if self.args.dry_run:
-            log(f"{'UPLOAD' if is_new else 'REPLACE'} {rel} (dry-run)")
-            self.counts["uploads"] += 1
+            log(f'UPLOAD {rel} (dry-run)')
+            self.counts['uploads'] += 1
             return
-        src = self.local_path(rel)
-        if not src.is_file() or sha256_file(src) != planned_sha:
-            abort(f"local file changed since planning: {rel}; rerun to avoid unintended upload")
-        parent_rel, _, filename = rel.rpartition("/")
-        folder_id = self.ensure_remote_folder(parent_rel)
-        expected = self.remote.get(rel)
-        # Server-wins precondition: abort if server changed since initial scan.
-        self.current_remote_match(rel, None if is_new else expected)
-        # Snapshot the exact bytes being uploaded. POST is deliberately NEVER
-        # retried: on timeout, the API may already have committed the upload.
-        snap = self.work / ("upload-" + uuid.uuid4().hex)
-        shutil.copyfile(src, snap)
-        if sha256_file(snap) != planned_sha:
-            abort(f"local file changed during upload snapshot: {rel}")
-        if is_new:
-            # The Ghost API's upload action is CREATE-ONLY.
-            reported_sha = self.client.upload(snap, filename, folder_id)
-            operation = "UPLOAD"
-        else:
-            # Critical for server-wins: file_replace checks the server's
-            # expected SHA atomically. HTTP 409 is a hard stop, never an upload.
-            if expected is None:
-                abort(f"missing remote file record for replacement: {rel}")
-            reported_sha = self.client.replace(
-                snap, filename, expected["file_id"], expected["sha"])
-            operation = "REPLACE"
-        if reported_sha and reported_sha != planned_sha:
-            abort(f"API {operation} checksum mismatch for {rel}: reported={reported_sha} local={planned_sha}")
-        # Verify exactly one matching filename, correct bytes, and (for a
-        # replacement) the SAME file_id. This preserves share references.
+        p = self.local_path(rel)
+        if not p.is_file() or sha256_file(p) != planned['sha256']:
+            abort(f'local file changed before upload: {rel}')
+        parent = rel.rpartition('/')[0]
+        parent_id = self.ensure_remote_folder(parent)
+        # Require name absent immediately before create.
+        _, files = self.client.list_folder(parent_id, self.page_size)
+        if any(x.get('name') == rel.rpartition('/')[2] for x in files):
+            abort(f'new remote file appeared: {rel}')
+        snapshot = self.work / ('new-' + uuid.uuid4().hex)
+        shutil.copyfile(p, snapshot)
+        if sha256_file(snapshot) != planned['sha256']:
+            abort(f'local file changed during upload snapshot: {rel}')
+        self.client.upload(snapshot, rel.rpartition('/')[2], parent_id)
+        _, files = self.client.list_folder(parent_id, self.page_size)
+        matches = [f for f in files if f.get('name') == rel.rpartition('/')[2]]
+        if len(matches) != 1 or matches[0].get('sha256', '').lower() != planned['sha256']:
+            abort(f'post-UPLOAD verification failed for {rel}')
+        new_id = matches[0]['file_id']
+        self.state['files'][new_id] = {'path': rel, 'sha256': planned['sha256'],
+                                      'dev': planned['dev'], 'ino': planned['ino']}
+        self.state['tombstones'].pop(rel, None)
+        self.save_state()
+        log(f'UPLOAD {rel}')
+        self.counts['uploads'] += 1
+
+    def replace(self, remote, planned):
+        rel, fid, sha = remote['path'], remote['file_id'], remote['sha256']
+        if self.args.dry_run:
+            log(f'REPLACE {rel} (dry-run)')
+            self.counts['uploads'] += 1
+            return
+        p = self.local_path(rel)
+        if not p.is_file() or sha256_file(p) != planned['sha256']:
+            abort(f'local file changed before replacement: {rel}')
+        self.recheck_file(fid, rel, sha)
+        snapshot = self.work / ('replace-' + uuid.uuid4().hex)
+        shutil.copyfile(p, snapshot)
+        if sha256_file(snapshot) != planned['sha256']:
+            abort(f'local file changed during replacement snapshot: {rel}')
+        self.client.replace(snapshot, rel.rpartition('/')[2], fid, sha)
+        self.recheck_file(fid, rel, planned['sha256'])
+        self.state['files'][fid] = {'path': rel, 'sha256': planned['sha256'],
+                                    'dev': planned['dev'], 'ino': planned['ino']}
+        self.save_state()
+        log(f'REPLACE {rel}')
+        self.counts['uploads'] += 1
+
+    def file_remote_move(self, remote, local_path, planned):
+        old_rel, dest_rel = remote['path'], local_path
+        if self.args.dry_run:
+            log(f'MOVE-REMOTE-FILE {old_rel} -> {dest_rel} (dry-run)')
+            self.counts['moves'] += 1
+            return
+        self.recheck_file(remote['file_id'], old_rel, remote['sha256'])
+        parent = dest_rel.rpartition('/')[0]
+        folder_id = self.ensure_remote_folder(parent)
         _, files = self.client.list_folder(folder_id, self.page_size)
-        matches = [f for f in files if isinstance(f, dict) and f.get("name") == filename]
-        if len(matches) != 1 or matches[0].get("sha256", "").lower() != planned_sha:
-            abort(f"post-{operation} verification FAILED for {rel}: expected one file with sha256={planned_sha}, found {len(matches)} matching name(s)")
-        if not is_new and matches[0].get("file_id") != expected["file_id"]:
-            abort(f"post-REPLACE verification FAILED for {rel}: file_id changed; aborting without updating local state")
-        self.remote[rel] = {"file_id": matches[0]["file_id"], "sha": planned_sha,
-                            "folder_id": folder_id}
-        self.set_state(rel, planned_sha, planned_sha)
-        log(f"{operation} {rel}")
-        self.counts["uploads"] += 1
+        if any(f.get('name') == dest_rel.rpartition('/')[2] for f in files):
+            abort(f'destination exists remotely: {dest_rel}')
+        self.client.update_file(remote['file_id'], dest_rel.rpartition('/')[2], folder_id)
+        self.recheck_file(remote['file_id'], dest_rel, remote['sha256'])
+        self.state['files'][remote['file_id']] = {'path': dest_rel,
+            'sha256': remote['sha256'], 'dev': planned['dev'], 'ino': planned['ino']}
+        self.save_state()
+        log(f'MOVE-REMOTE-FILE {old_rel} -> {dest_rel} (file_id preserved)')
+        self.counts['moves'] += 1
+
+    def prepare_archive(self, remote):
+        # Unique archive per operation; hidden subtree is never scanned/synced.
+        rel = remote['path']
+        archive_rel = ARCHIVE_DIR + '/' + dt.datetime.now().strftime('%Y-%m-%d') + '/' + uuid.uuid4().hex + '/' + rel
+        archive_path = self.local_path(archive_rel)
+        if self.args.dry_run:
+            log(f'ARCHIVE {rel} -> {archive_rel} (dry-run)')
+            return archive_rel
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        if archive_path.exists():
+            abort(f'archive destination unexpectedly exists: {archive_path}')
+        downloaded = self.client.download(remote['file_id'])
+        fd, temp_name = tempfile.mkstemp(prefix='.telmi-archive-', dir=str(archive_path.parent))
+        try:
+            with os.fdopen(fd, 'wb') as dest, open(downloaded, 'rb') as source:
+                shutil.copyfileobj(source, dest, length=1024 * 1024)
+                dest.flush()
+                os.fsync(dest.fileno())
+            if sha256_file(temp_name) != remote['sha256']:
+                abort(f'archive SHA mismatch for {rel}; remote delete refused')
+            os.replace(temp_name, archive_path)
+            self.sync_dir(archive_path.parent)
+            if sha256_file(archive_path) != remote['sha256']:
+                abort(f'archive checksum verification failed: {archive_path}')
+            log(f'ARCHIVE {rel} -> {archive_rel}')
+            return archive_rel
+        finally:
+            if os.path.lexists(temp_name):
+                os.unlink(temp_name)
+
+    def delete_local_missing(self, remote):
+        fid, rel, sha = remote['file_id'], remote['path'], remote['sha256']
+        if self.args.dry_run:
+            log(f'ARCHIVE+DELETE-REMOTE {rel} (dry-run)')
+            self.counts['deletes'] += 1
+            return
+        if self.local_path(rel).exists():
+            abort(f'local file reappeared before delete: {rel}; HARD STOP')
+        # Refresh the COMPLETE server inventory immediately before destructive
+        # work: the earlier planning snapshot may now be stale.
+        self.fetch_tree()
+        if len(self.remote_by_id) <= 1:
+            abort('deletion would leave Files space empty; HARD STOP')
+        now = self.remote_by_id.get(fid)
+        if not now or now['path'] != rel or now['sha256'] != sha:
+            abort(f'remote file changed before deletion: {rel}; server wins')
+        self.recheck_file(fid, rel, sha)
+        archive_rel = self.prepare_archive(remote)
+        if self.local_path(rel).exists():
+            abort(f'local file reappeared during archive: {rel}; HARD STOP')
+        self.recheck_file(fid, rel, sha)
+        # Journal the transaction BEFORE the non-idempotent POST. Recoverable
+        # after crash or unknown-commit HTTP error; server bytes preserved.
+        self.state['pending_deletes'][fid] = {'path': rel, 'sha256': sha,
+                                              'archive': archive_rel, 'dev': None, 'ino': None}
+        self.save_state()
+        self.client.delete_file(fid)
+        _, files = self.client.list_folder(self.folders[rel.rpartition('/')[0]], self.page_size)
+        if any(f.get('file_id') == fid for f in files):
+            abort(f'delete verification failed: file_id still exists for {rel}')
+        self.finish_delete(fid)
+        log(f'DELETE-REMOTE {rel} (archived {archive_rel})')
+        self.counts['deletes'] += 1
+
+    def finish_delete(self, fid):
+        pending = self.state['pending_deletes'].pop(fid)
+        self.state['files'].pop(fid, None)
+        self.state['tombstones'][pending['path']] = {'reason': 'local_deleted',
+                             'file_id': fid, 'sha256': pending['sha256'], 'archive': pending['archive']}
+        self.save_state()
+
+    def recover_pending(self):
+        for fid, pending in list(self.state['pending_deletes'].items()):
+            archive = self.local_path(pending['archive'])
+            if not archive.is_file() or sha256_file(archive) != pending['sha256']:
+                abort(f'pending delete archive missing or corrupted: {archive}')
+            remote = self.remote_by_id.get(fid)
+            if remote is None:
+                if not self.args.dry_run:
+                    self.finish_delete(fid)
+                log(f'RECOVER-COMMITTED-DELETE {pending["path"]}')
+            else:
+                # Manual check before retry is intentional. A timed-out POST
+                # may have been committed, undone, or another client modified
+                # the object. No silent automatic re-delete.
+                abort(f'pending delete {pending["path"]!r} still exists on server; archive safe; manual resolution required')
+
+    def refresh_folder_state(self):
+        if self.args.dry_run:
+            return
+        for fid, remote in self.folder_by_id.items():
+            path = remote['path']
+            local = self.local_dirs.get(path, {})
+            entry = self.state['folders'].get(fid)
+            if entry is None:
+                self.state['folders'][fid] = {'path': path, 'dev': local.get('dev'), 'ino': local.get('ino')}
+            elif entry['path'] == path and local and not self.same_identity(entry, local):
+                entry.update(self.identity_obj(local))
+        for fid in set(self.state['folders']) - set(self.folder_by_id):
+            self.state['folders'].pop(fid, None)
+        self.save_state()
+
+    def apply_remote_deletions(self):
+        if self.args.mode == 'push':
+            return
+        # A complete recursive inventory distinguishes missing IDs from moves.
+        # Also clean up remnants retained by earlier v6 runs / legacy migration.
+        candidates = {}
+        missing_ids = []
+        for fid, old in self.state['files'].items():
+            if fid not in self.remote_by_id:
+                missing_ids.append(fid)
+                lp = self.get_identified(old, self.local, old['path'])
+                if lp:
+                    candidates[lp] = fid
+        old_tombstones = []
+        for rel, record in self.state['tombstones'].items():
+            if record['reason'] != 'remote_deleted':
+                continue
+            # If the server now has this path or ID, normal reconciliation wins.
+            if rel in self.remote or record.get('file_id') in self.remote_by_id:
+                continue
+            old_tombstones.append(rel)
+            if rel in self.local:
+                candidates.setdefault(rel, record.get('file_id'))
+        for rel in sorted(candidates):
+            path = self.local_path(rel)
+            if not path.is_file():
+                abort(f'remote deletion target is no longer a regular file: {rel}')
+            if not self.args.dry_run:
+                path.unlink()
+                self.sync_dir(path.parent)
+            log(f'DELETE-LOCAL {rel} (server deleted; no archive)' +
+                (' (dry-run)' if self.args.dry_run else ''))
+            self.counts['local_deletes'] += 1
+            # Keep the planning snapshot consistent, including in dry-run.
+            self.local.pop(rel, None)
+        for fid in missing_ids:
+            self.state['files'].pop(fid, None)
+        for rel in old_tombstones:
+            self.state['tombstones'].pop(rel, None)
+        self.save_state()
 
     def run(self):
-        self.preflight()
-        for rel in self.remote_absent:
-            log(f"SKIP {rel} (deleted on server; local copy retained, NOT re-uploaded)")
-        self.create_local_dirs()
-        for action, rel, baseline in self.actions:
-            if action == "adopt":
-                if self.args.dry_run:
-                    log(f"ADOPT {rel} (dry-run)")
-                else:
-                    # Don't store stale hashes if files changed after preflight.
-                    remote_sha = self.remote[rel]["sha"]
-                    if sha256_file(self.local_path(rel)) != remote_sha:
-                        abort(f"local file changed before state adoption: {rel}")
-                    self.set_state(rel, remote_sha, remote_sha)
-            elif action in ("download", "conflict"):
-                self.do_download(rel, action == "conflict", baseline)
-            elif action in ("upload", "upload_new"):
-                self.do_upload(rel, baseline, action == "upload_new")
-            else:
-                abort(f"unknown action {action}")
-        log("telmi-files-sync done: " + " ".join(f"{k}={v}" for k, v in self.counts.items()) + " errors=0")
+        self.load_state()
+        self.fetch_tree()   # No local or remote writes before full inventory.
+        self.scan_local()
+        self.migrate_legacy()
+        self.recover_pending()
 
+        # Reject local/remote case-only collisions before mutations.
+        remote_folded = {canonical_path(p): p for p in [*self.remote, *self.folders]}
+        for p in [*self.local, *self.local_dirs]:
+            other = remote_folded.get(canonical_path(p))
+            if other is not None and other != p:
+                abort(f'case/Unicode mismatch {p!r} vs remote {other!r}')
+
+        # Directory moves first. A single folder_update preserves all child
+        # folder_id and file_id values without recreating any objects.
+        self.run_folder_moves()
+        if self.args.dry_run and self.dry_folder_moves:
+            log('DRY-RUN: folder moves listed; subsequent file actions require the folder move to complete; no writes performed')
+            return
+        self.fetch_tree()
+        self.scan_local()
+        self.ensure_local_folders()
+        if not self.args.dry_run:
+            self.scan_local()
+            self.refresh_folder_state()
+
+        self.apply_remote_deletions()
+
+        action_file_moves = []
+        action_local_moves = []
+        action_downloads = []
+        action_replaces = []
+        action_uploads = []
+        action_deletes = []
+        retained = []
+        claimed_local = set()
+        for fid, old in sorted(self.state['files'].items(), key=lambda pair: pair[1]['path']):
+            remote = self.remote_by_id.get(fid)
+            oldpath = old['path']
+            lp = self.get_identified(old, self.local, oldpath)
+            if lp:
+                claimed_local.add(lp)
+            if remote is None:
+                if lp:
+                    retained.append((fid, lp))
+                # --push leaves local files and tracking intact for a later pull.
+                self.counts['skipped'] += 1
+                continue
+            rp = remote['path']
+            rchanged_path = rp != oldpath
+            rchanged_bytes = remote['sha256'] != old['sha256']
+            lchanged_path = lp is not None and lp != oldpath
+            lchanged_bytes = lp is not None and self.local[lp]['sha256'] != old['sha256']
+            if rchanged_path:
+                if lp == oldpath and old.get('ino') is not None and not self.same_identity(old, self.local[oldpath]):
+                    abort(f'remote file moved but local source was replaced: {oldpath}; HARD STOP')
+                # Server path wins. If local path differs, move local, preserving
+                # local bytes; subsequent byte reconciliation happens below.
+                if lp and lp != rp:
+                    action_local_moves.append((lp, rp, fid))
+                elif lp is None:
+                    action_downloads.append((remote, None, False))
+                elif lp == rp:
+                    pass
+                # No local rename attempt while remote path changed.
+            elif lchanged_path and rchanged_bytes:
+                # Server content changed while Mac moved its older copy.
+                # Keep the server path and bytes; preserve divergent Mac bytes.
+                action_local_moves.append((lp, rp, fid))
+                action_downloads.append((remote, self.local[lp]['sha256'], lchanged_bytes))
+                continue
+            elif lchanged_path:
+                if self.args.mode != 'pull':
+                    action_file_moves.append((remote, lp, self.local[lp]))
+                else:
+                    action_local_moves.append((lp, rp, fid))  # --pull restores server path
+                continue
+            elif lp is None:
+                if rchanged_bytes or fid in self.force_restore_ids:
+                    action_downloads.append((remote, None, False))
+                elif self.args.mode != 'pull' and not self.migrated:
+                    action_deletes.append(remote)
+                else:
+                    action_downloads.append((remote, None, False))
+                continue
+            # Same resolved path: server wins content conflicts.
+            resolved = rp
+            cur = self.local.get(resolved) if not rchanged_path else self.local.get(lp)
+            if not cur:
+                continue
+            if cur['sha256'] == remote['sha256']:
+                continue
+            if rchanged_bytes:
+                action_downloads.append((remote, cur['sha256'], lchanged_bytes))
+            elif lchanged_bytes and self.args.mode != 'pull':
+                if rchanged_path:
+                    # Defer editing while server metadata changed. Next pass
+                    # resolves the moved file with current state.
+                    continue
+                action_replaces.append((remote, cur))
+            elif not lchanged_bytes:
+                action_downloads.append((remote, cur['sha256'], False))
+
+        # Every remote file without a manifest ID is remote-first.
+        for fid, remote in sorted(self.remote_by_id.items(), key=lambda item: item[1]['path']):
+            if fid in self.state['files']:
+                continue
+            lp = remote['path']
+            cur = self.local.get(lp)
+            if cur and lp in claimed_local:
+                abort(f'new remote ID overlaps tracked local file: {lp}; HARD STOP')
+            if cur is None:
+                action_downloads.append((remote, None, False))
+            elif cur['sha256'] != remote['sha256']:
+                action_downloads.append((remote, cur['sha256'], True))
+            elif not self.args.dry_run:
+                self.state['files'][fid] = {'path': lp, 'sha256': remote['sha256'],
+                                             **self.identity_obj(cur)}
+                self.save_state()
+            claimed_local.add(lp)
+
+        for lp, local in sorted(self.local.items()):
+            if lp in claimed_local:
+                continue
+            if lp in self.state['tombstones']:
+                retained.append(('', lp))
+                continue
+            if lp in self.remote:
+                # The remote file already has priority; never upload a duplicate.
+                continue
+            if any(canonical_path(lp) == canonical_path(p) for p in [*self.remote, *self.folders]):
+                abort(f'local file conflicts with remote path: {lp}')
+            if self.args.mode != 'pull':
+                action_uploads.append((lp, local))
+            else:
+                self.counts['skipped'] += 1
+
+        # Ambiguity guard: same bytes newly copied to another path may represent
+        # an inode-changing move, so do NOT treat it as a delete+new upload.
+        for remote in action_deletes:
+            sha = remote['sha256']
+            hits = [p for p, l in action_uploads if l['sha256'] == sha]
+            if hits:
+                abort(f'ambiguous move vs delete: {remote["path"]} -> {hits}; cannot safely preserve file_id; HARD STOP')
+        if action_deletes:
+            limit = min(self.max_deletes, max(1, len(self.remote) * self.max_delete_pct // 100))
+            if len(action_deletes) > limit:
+                abort(f'deletion guard: {len(action_deletes)} local deletions exceed {limit} per run; HARD STOP')
+            if len(action_deletes) >= len(self.remote):
+                abort('deletion guard: would leave remote Files space empty; HARD STOP')
+        log(f'Plan: file_moves={len(action_file_moves)} folder_moves=see log local_moves={len(action_local_moves)} downloads={len(action_downloads)} uploads={len(action_uploads)} replaces={len(action_replaces)} archive_deletes={len(action_deletes)}')
+
+        # No delete operations until every move and new upload is complete.
+        for src, dest, fid in action_local_moves:
+            if self.args.mode == 'push':
+                self.counts['skipped'] += 1
+                continue
+            self.local_move(src, dest, False)
+            if not self.args.dry_run:
+                self.scan_local()
+                r = self.remote_by_id[fid]
+                self.state['files'][fid] = {'path': dest, 'sha256': self.state['files'][fid]['sha256'],
+                                              **self.identity_obj(self.local[dest])}
+                self.save_state()
+        for remote, dest, planned in action_file_moves:
+            self.file_remote_move(remote, dest, planned)
+        for local_path, info in action_uploads:
+            self.new_upload(local_path, info)
+        for remote, planned in action_replaces:
+            self.replace(remote, planned)
+        for remote, planned_sha, conflicting in action_downloads:
+            if self.args.mode == 'push':
+                self.counts['skipped'] += 1
+                continue
+            self.download(remote, remote['path'], planned_sha, conflicting)
+        for remote in action_deletes:
+            self.delete_local_missing(remote)
+        if not self.args.dry_run:
+            self.scan_local()
+            self.refresh_folder_state()
+            # Adopt verified unchanged entries, filling missing inode metadata.
+            for fid, remote in self.remote_by_id.items():
+                if fid in self.state['files'] and remote['path'] in self.local:
+                    entry = self.state['files'][fid]
+                    if self.local[remote['path']]['sha256'] == remote['sha256']:
+                        entry.update({'path': remote['path'], 'sha256': remote['sha256'],
+                                      **self.identity_obj(self.local[remote['path']])})
+            self.save_state()
+        log('telmi-files-sync done: ' + ' '.join(f'{k}={v}' for k, v in self.counts.items()) + ' errors=0')
 
 def main():
     parser = argparse.ArgumentParser(description="telmi OS Files two-way sync")

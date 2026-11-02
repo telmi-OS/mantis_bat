@@ -93,7 +93,7 @@ The standalone Ghost Eval tool challenges a configured Ghost through realtime Gh
 
 The standalone Nextcloud Talk Connect tool creates public Talk rooms through a protected Mantis Bat GET endpoint. Its installer validates a dedicated Nextcloud service account, generates a Ghost X-Auth key, and displays private setup URLs. The protected dashboard includes copy-ready Ghost preset fields. Concurrent calls with a normalized matching meeting name reuse one room result for five minutes.
 
-The standalone Files Sync tool is a no-auth guided page with two view modes and local macOS and Windows sync clients. It walks a user through configuring one Files space on their computer; the web page does not store credentials or run the sync itself.
+The standalone Files Sync tool is a no-auth guided page with two view modes and local macOS and Windows sync clients. Its v6 clients preserve file/folder IDs across recognized moves and propagate file deletions: an unchanged server copy is archived before a local deletion, while server deletions remove tracked local copies without an archive. If a local deletion conflicts with changed server content, server wins and is restored. The page walks a user through configuring one Files space on their computer; it does not store credentials or run the sync itself. See [the Files Sync guide](docs/files-sync-tool.md) for the deletion behavior and safeguards.
 
 The RAG dashboard uses a private bearer URL (`index.php?key=...`), not a traditional password login. It is Hades-compatible: 7 MiB per file and per job, one job per cron call, a 20-second Ghost request timeout, and persisted three-attempt retry handling. GD and external process/PDF binaries are not required.
 

@@ -3,7 +3,7 @@
 # Usage:
 #   powershell.exe -NoProfile -File .\telmi-files-sync-windows.ps1 [--dry-run] [--pull] [--push] [--verbose]
 #
-# Contract: SERVER WINS. No deletion propagation. Remote inventory MUST contain
+# Contract: SERVER WINS. Identity-aware moves; archive-first local deletes; direct remote-to-local deletes. Remote inventory MUST contain
 # at least one file. HTTP/API/validation/transfer failures HARD STOP.
 # Existing files: file_replace (file_id + expected_sha256); new: upload.
 # GETs may retry; mutation POSTs are NEVER retried automatically.
@@ -30,6 +30,8 @@ $Config = @{
     HTTP_TRANSFER_TIMEOUT = 3600          # seconds
     LIST_PAGE_SIZE     = 500              # API maximum; no pagination available
     MAX_FOLDER_DEPTH   = 32
+    MAX_LOCAL_DELETES_PER_RUN = 10
+    MAX_LOCAL_DELETE_PERCENT = 25
 }
 foreach ($key in @($Config.Keys)) {
     $override = [Environment]::GetEnvironmentVariable($key, 'Process')
@@ -106,52 +108,66 @@ function Replace-Atomic([string]$Temp, [string]$Dest) {
     if ([IO.Directory]::Exists($Dest)) { Stop-Sync "destination became a directory: $Dest" }
     if ([IO.File]::Exists($Dest)) {
         Assert-NotLink $Dest
-        [IO.File]::Replace($Temp, $Dest, $null)
+        [IO.File]::Replace($Temp, $Dest, [NullString]::Value)
     } else {
         [IO.File]::Move($Temp, $Dest)
     }
 }
 function Save-State {
     if ($script:DryRun) { return }
-    if (-not [IO.Directory]::Exists($script:Root)) { [IO.Directory]::CreateDirectory($script:Root) | Out-Null }
-    $statePath = Rel-Path ([string]$Config.STATE_FILE)
-    $tmp = [IO.Path]::Combine($script:Root, '.telmi-state-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    [IO.Directory]::CreateDirectory($script:Root) | Out-Null
+    $dest = Rel-Path ([string]$Config.STATE_FILE)
+    $tmp = Join-Path $script:Root ('.telmi-state-' + [Guid]::NewGuid().ToString('N'))
     try {
-        $obj = @{files = @{}}
-        foreach ($rel in $script:State.Keys) { $obj.files[$rel] = $script:State[$rel] }
-        $json = $obj | ConvertTo-Json -Depth 10
-        [IO.File]::WriteAllText($tmp, ($json + "`n"), (New-Object Text.UTF8Encoding($false)))
-        Replace-Atomic $tmp $statePath
+        $json = $script:Manifest | ConvertTo-Json -Depth 30
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes($json + "`n")
+        $stream = [IO.File]::Open($tmp, 'CreateNew', 'Write', 'None')
+        try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+        Replace-Atomic $tmp $dest
     } finally { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } }
 }
 function State-Set([string]$Rel, [string]$RemoteSha, [string]$LocalSha) {
-    $script:State[$Rel] = @{remote_sha256=$RemoteSha; local_sha256=$LocalSha}
+    $fid = $script:Remote[$Rel].id
+    $script:State[$fid] = @{path=$Rel;sha256=$RemoteSha;identity=(Local-Identity (Rel-Path $Rel))}
+    $script:Manifest.tombstones.Remove($Rel) | Out-Null
     Save-State
 }
 function Load-State {
-    $script:State = New-Dict
+    $script:Migrated = $false
+    $script:Manifest = @{version=2;scope=@{base_url=$script:BaseUrl;space_id=$script:SpaceId};files=(New-Dict);folders=(New-Dict);tombstones=(New-Dict);pending_deletes=(New-Dict)}
     $path = Rel-Path ([string]$Config.STATE_FILE)
-    if (-not [IO.File]::Exists($path)) {
-        if ([IO.Directory]::Exists($path)) { Stop-Sync "state path is a directory: $path" }
-        return
+    if ([IO.Directory]::Exists($path)) { Stop-Sync 'state path is a directory' }
+    if ([IO.File]::Exists($path)) {
+        Assert-NotLink $path
+        $raw = Convert-Map ([IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json)
+        if ($raw -isnot [Collections.IDictionary] -or (Prop $raw 'files') -isnot [Collections.IDictionary]) { Stop-Sync 'invalid state JSON' }
+        if ((Prop $raw 'version') -eq 2) {
+            $scope = Prop $raw 'scope'
+            if ((Prop $scope 'base_url') -cne $script:BaseUrl -or (Prop $scope 'space_id') -cne $script:SpaceId) { Stop-Sync 'manifest belongs to another server/space' }
+            foreach ($key in @('files','folders','tombstones','pending_deletes')) {
+                if ((Prop $raw $key) -isnot [Collections.IDictionary]) { Stop-Sync "invalid manifest section $key" }
+                foreach ($id in $raw[$key].Keys) {
+                    $rec = $raw[$key][$id]
+                    if ($rec -isnot [Collections.IDictionary]) { Stop-Sync "invalid manifest record $id" }
+                    if ($key -eq 'tombstones') {
+                        Assert-StatePath $id
+                        if ((Prop $rec 'reason') -notin @('remote_deleted','local_deleted')) { Stop-Sync 'invalid tombstone' }
+                    } else {
+                        Assert-StatePath (Prop $rec 'path')
+                        if ($key -ne 'folders' -and -not (Is-Sha (Prop $rec 'sha256'))) { Stop-Sync 'invalid manifest hash' }
+                        if ($key -eq 'pending_deletes') { Assert-ArchivePath (Prop $rec 'archive') }
+                    }
+                    $script:Manifest[$key][$id] = $rec
+                }
+            }
+        } else {
+            $script:Legacy = $raw.files
+            $script:Migrated = $true
+            Log 'INFO legacy manifest detected: identity migration; remote delete disabled for first run'
+        }
     }
-    Assert-NotLink $path
-    $raw = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop
-    $files = Prop $raw 'files'
-    if ($null -eq $files -or $files -isnot [pscustomobject]) { Stop-Sync 'state JSON must contain a files object' }
-    foreach ($p in $files.PSObject.Properties) {
-        $rel = [string]$p.Name
-        foreach ($part in $rel.Split('/')) { $null = Check-Name $part 'state path' }
-        $entry = $p.Value
-        $rsha = Prop $entry 'remote_sha256'; $lsha = Prop $entry 'local_sha256'
-        if (-not (Is-Sha $rsha) -or -not (Is-Sha $lsha)) { Stop-Sync "corrupted state hashes for $rel" }
-        $script:State.Add($rel, @{remote_sha256=$rsha.ToLowerInvariant();local_sha256=$lsha.ToLowerInvariant()})
-    }
+    $script:State = $script:Manifest.files
 }
-
-# --- HTTP (native .NET HttpClient) --------------------------------------------
-Add-Type -AssemblyName System.Net.Http
-$script:Http = $null
 function Api-Url([string]$Action, [hashtable]$Fields) {
     $query = @('action=' + [uri]::EscapeDataString($Action))
     foreach ($key in @($Fields.Keys | Sort-Object)) {
@@ -279,6 +295,7 @@ function Read-RemoteTree {
     $script:Remote = New-Dict
     $script:Folders = New-Dict
     $script:Folders.Add('', '')
+    $script:Counts.folders = 0
     $seenPaths = New-Dict; $seenIds = New-Dict; $fileIds = New-Dict
     $seenPaths.Add((Canon ([string]$Config.STATE_FILE)), '[reserved state file]')
     $queue = [Collections.Generic.Queue[object]]::new()
@@ -293,6 +310,7 @@ function Read-RemoteTree {
         if ($script:VerboseMode) { Log "LIST $(if ($current.rel) { $current.rel } else { '/' }): $($listing.folders.Count) folders, $($listing.files.Count) files" }
         foreach ($f in $listing.folders) {
             $name = Check-Name (Prop $f 'name') 'remote folder'
+            Assert-RemoteName $name
             $fid = Prop $f 'folder_id'; if ($fid -isnot [string] -or -not $fid) { Stop-Sync "API folder '$name' missing ID" }
             Check-ListingParent (Prop $f 'parent_id') $current.id
             $rel = if ($current.rel) { $current.rel + '/' + $name } else { $name }
@@ -305,6 +323,7 @@ function Read-RemoteTree {
         }
         foreach ($f in $listing.files) {
             $name = Check-Name (Prop $f 'name') 'remote file'
+            Assert-RemoteName $name
             $fid = Prop $f 'file_id'; $sha = Prop $f 'sha256'
             if ($fid -isnot [string] -or -not $fid -or $fileIds.ContainsKey($fid)) { Stop-Sync "API file '$name' has missing/duplicate file_id" }
             if (-not (Is-Sha $sha)) { Stop-Sync "API file '$name' has missing/invalid sha256" }
@@ -321,6 +340,8 @@ function Read-RemoteTree {
 }
 function Read-LocalTree {
     $local = New-Dict; $pathMap = New-Dict
+    $script:LocalDirs = New-Dict
+    $script:LocalIds = New-Dict
     if (-not [IO.Directory]::Exists($script:Root)) { return $local }
     Assert-NotLink $script:Root
     $queue = [Collections.Generic.Queue[string]]::new(); $queue.Enqueue($script:Root)
@@ -334,77 +355,84 @@ function Read-LocalTree {
             $canon = Canon $rel
             if ($pathMap.ContainsKey($canon)) { Stop-Sync "local case/Unicode collision at '$rel'" }
             $pathMap.Add($canon, $rel)
-            if ($entry.PSIsContainer) { $queue.Enqueue($full); continue }
+            if ($entry.PSIsContainer) {
+                if ($name.StartsWith('.telmi-', [StringComparison]::OrdinalIgnoreCase)) { continue }
+                $script:LocalDirs[$rel] = @{identity=(Local-Identity $full)}
+                $queue.Enqueue($full); continue
+            }
             if (-not ($entry -is [IO.FileInfo])) { Stop-Sync "unsupported local filesystem entry: $full" }
             if (($rel -ceq [string]$Config.STATE_FILE) -or $name -ceq '.DS_Store' -or
                 $name.StartsWith('.telmi-', [StringComparison]::OrdinalIgnoreCase) -or
                 $name.IndexOf('.conflict-', [StringComparison]::OrdinalIgnoreCase) -ge 0) { continue }
             $local.Add($rel, (Sha $full))
+            $script:LocalIds[$rel] = @{identity=(Local-Identity $full)}
         }
     }
     return $local
 }
 function Plan-Sync {
-    Load-State
-    Read-RemoteTree
-    $local = Read-LocalTree
-    $remoteNames = New-Dict
-    foreach ($name in @($script:Remote.Keys) + @($script:Folders.Keys)) {
-        $remoteNames[(Canon $name)] = $name
-    }
-    foreach ($rel in $local.Keys) {
-        $c = Canon $rel
-        if ($remoteNames.ContainsKey($c) -and $remoteNames[$c] -cne $rel) {
-            Stop-Sync "local/remote paths differ in case or Unicode: '$rel' vs '$($remoteNames[$c])'"
-        }
-    }
-    $script:Actions = New-Object System.Collections.ArrayList
-    $script:RemoteAbsent = New-Object System.Collections.ArrayList
-    foreach ($rel in @($script:Remote.Keys | Sort-Object)) {
-        $r = $script:Remote[$rel]
-        $dest = Rel-Path $rel
-        if (-not $local.ContainsKey($rel)) {
-            if ([IO.Directory]::Exists($dest)) { Stop-Sync "remote file conflicts with local folder: $rel" }
-            if ($script:Mode -ne 'push') { $null = $script:Actions.Add(@{op='download';rel=$rel;baseline=$null}) }
-            else { $script:Counts.skipped++ }
+    $local = $script:Local
+    $script:Actions = [Collections.ArrayList]::new()
+    $claimed = New-Dict
+    foreach ($fid in @($script:State.Keys | Sort-Object)) {
+        $old = $script:State[$fid]; $lp = Find-Local $old $script:LocalIds
+        if ($null -ne $lp) { $claimed[$lp] = $true }
+        $rp = Remote-PathForId $fid
+        if ($null -eq $rp) { $script:Counts.skipped++; continue }
+        $r = $script:Remote[$rp]
+        $rc = $r.sha -cne $old.sha256
+        $movedServer = $rp -cne $old.path
+        if ($movedServer -and $null -ne $lp -and $lp -ceq $old.path -and (Prop $old 'identity') -and $old.identity -cne $script:LocalIds[$lp].identity) { Stop-Sync 'remote file moved but local source was replaced' }
+        if ($null -eq $lp) {
+            if ($rc -or $movedServer -or $script:ForceRestore.ContainsKey($fid) -or $script:Mode -eq 'pull' -or $script:Migrated) {
+                if ($script:Mode -ne 'push') { $null = $script:Actions.Add(@{op='download';rel=$rp;baseline=$null}) }
+            } else { $null = $script:Actions.Add(@{op='delete-remote';rel=$rp;baseline=$null}) }
             continue
         }
-        $lsha = [string]$local[$rel]; $rsha = [string]$r.sha
-        $st = $null; if ($script:State.ContainsKey($rel)) { $st = $script:State[$rel] }
-        if ($lsha -ceq $rsha) {
-            if ($null -eq $st -or $st.remote_sha256 -cne $rsha -or $st.local_sha256 -cne $lsha) {
-                $null = $script:Actions.Add(@{op='adopt';rel=$rel;baseline=$lsha})
+        $lc = $local[$lp] -cne $old.sha256
+        if ($movedServer -or ($lp -cne $rp -and ($rc -or $script:Mode -eq 'pull'))) {
+            if ($script:Mode -eq 'push') { continue }
+            if ($lp -cne $rp) { $null = $script:Actions.Add(@{op='move-local';rel=$rp;src=$lp;fid=$fid}) }
+            if ($local[$lp] -cne $r.sha -and ($rc -or -not $lc)) {
+                $null = $script:Actions.Add(@{op=$(if ($lc) {'conflict'} else {'download'});rel=$rp;baseline=$local[$lp]})
             }
             continue
         }
-        $rc = ($null -eq $st -or $rsha -cne $st.remote_sha256)
-        $lc = ($null -eq $st -or $lsha -cne $st.local_sha256)
-        if ($rc -and $lc) {
-            if ($script:Mode -ne 'push') { $null = $script:Actions.Add(@{op='conflict';rel=$rel;baseline=$lsha}) }
-            else { $script:Counts.skipped++ }
-        } elseif ($rc) {
-            if ($script:Mode -ne 'push') { $null = $script:Actions.Add(@{op='download';rel=$rel;baseline=$lsha}) }
-            else { $script:Counts.skipped++ }
-        } elseif ($lc) {
-            if ($script:Mode -ne 'pull') { $null = $script:Actions.Add(@{op='replace';rel=$rel;baseline=$lsha}) }
-            else { $script:Counts.skipped++ }
-        } else { Stop-Sync "inconsistent state for $rel" }
+        if ($lp -cne $rp) {
+            $null = $script:Actions.Add(@{op='move-remote';rel=$rp;dest=$lp;baseline=$local[$lp]}); continue
+        }
+        if ($local[$lp] -ceq $r.sha) {
+            $null = $script:Actions.Add(@{op='adopt';rel=$rp;baseline=$r.sha})
+        } elseif ($rc -and $script:Mode -ne 'push') {
+            $null = $script:Actions.Add(@{op=$(if ($lc) {'conflict'} else {'download'});rel=$rp;baseline=$local[$lp]})
+        } elseif ($lc -and $script:Mode -ne 'pull') {
+            $null = $script:Actions.Add(@{op='replace';rel=$rp;baseline=$local[$lp]})
+        }
+    }
+    foreach ($rel in @($script:Remote.Keys | Sort-Object)) {
+        $r = $script:Remote[$rel]
+        if ($script:State.ContainsKey($r.id)) { continue }
+        if ($claimed.ContainsKey($rel)) { Stop-Sync "new remote ID overlaps tracked local file: $rel" }
+        if ($local.ContainsKey($rel) -and $local[$rel] -ceq $r.sha) {
+            $null = $script:Actions.Add(@{op='adopt';rel=$rel;baseline=$r.sha})
+        } elseif ($script:Mode -ne 'push') {
+            $baseline = if ($local.ContainsKey($rel)) { $local[$rel] } else { $null }
+            $null = $script:Actions.Add(@{op=$(if ($null -ne $baseline) {'conflict'} else {'download'});rel=$rel;baseline=$baseline})
+        }
+        $claimed[$rel] = $true
     }
     foreach ($rel in @($local.Keys | Sort-Object)) {
-        if ($script:Remote.ContainsKey($rel)) { continue }
-        if ($script:State.ContainsKey($rel)) {
-            $null = $script:RemoteAbsent.Add($rel); $script:Counts.skipped++; continue
-        }
-        if ($remoteNames.ContainsKey((Canon $rel))) { Stop-Sync "local file collides with remote path: '$rel'" }
+        if ($claimed.ContainsKey($rel) -or $script:Manifest.tombstones.ContainsKey($rel) -or $script:Remote.ContainsKey($rel)) { continue }
         if ($script:Mode -ne 'pull') { $null = $script:Actions.Add(@{op='upload';rel=$rel;baseline=$local[$rel]}) }
-        else { $script:Counts.skipped++ }
     }
-    foreach ($dir in $script:Folders.Keys) {
-        if ($dir -and $local.ContainsKey($dir)) { Stop-Sync "local file blocks remote folder: $dir" }
-        $p = if ($dir) { Rel-Path $dir } else { $script:Root }
-        if ([IO.File]::Exists($p)) { Stop-Sync "remote folder path is a local file: $dir" }
+    $deletes = @($script:Actions | Where-Object { $_.op -eq 'delete-remote' })
+    foreach ($act in $deletes) {
+        $matches = @($script:Actions | Where-Object { $_.op -eq 'upload' -and $_.baseline -ceq $script:Remote[$act.rel].sha })
+        if ($matches.Count) { Stop-Sync "ambiguous move vs delete: $($act.rel)" }
     }
-    Log "Plan: $($script:Actions.Count) actions, $($script:RemoteAbsent.Count) previously-synced remote deletions"
+    $limit = [Math]::Min($script:MaxDeletes, [Math]::Max(1, [Math]::Floor($script:Remote.Count * $script:MaxDeletePercent / 100)))
+    if ($deletes.Count -gt $limit -or ($deletes.Count -gt 0 -and $deletes.Count -ge $script:Remote.Count)) { Stop-Sync 'local deletion guard exceeded or would remove final remote file' }
+    Log "Plan: $($script:Actions.Count) actions; archive_deletes=$($deletes.Count)"
 }
 function Remote-Match([string]$Rel, $Expected) {
     $parent = Parent-Rel $Rel
@@ -425,12 +453,12 @@ function Remote-Match([string]$Rel, $Expected) {
 function Remote-EnsureFolder([string]$Rel) {
     if ($script:Folders.ContainsKey($Rel)) { return [string]$script:Folders[$Rel] }
     $parent = Parent-Rel $Rel; $name = Leaf-Rel $Rel
-    $pid = Remote-EnsureFolder $parent
-    $lst = Api-List $pid
+    $parentId = Remote-EnsureFolder $parent
+    $lst = Api-List $parentId
     $matches = @($lst.folders | Where-Object { $n = Prop $_ 'name'; $n -is [string] -and (Canon $n) -ceq (Canon $name) })
     if ($matches.Count) { Stop-Sync "remote folder appeared since inventory: $Rel" }
     $body = @{space_id=$script:SpaceId;name=$name}
-    if ($pid) { $body.parent_id = $pid }
+    if ($parentId) { $body.parent_id = $parentId }
     $d = Api-Data (Api-Call -Method 'POST' -Action 'folder_create' -Body $body) 'folder_create'
     $fid = Prop $d 'folder_id'
     if ($fid -isnot [string] -or -not $fid) { Stop-Sync "folder_create missing folder_id for $Rel" }
@@ -520,27 +548,275 @@ function Upload-Action([string]$Rel, [string]$PlannedSha, [bool]$NewFile) {
     } finally { if ([IO.File]::Exists($snap)) { [IO.File]::Delete($snap) } }
 }
 function Run-Sync {
-    Plan-Sync
-    foreach ($rel in $script:RemoteAbsent) { Log "SKIP $rel (deleted remotely; local copy retained, NOT uploaded)" }
+    $script:ForceRestore = New-Dict
+    Load-State
+    Read-RemoteTree
+    $script:Local = Read-LocalTree
+    if ($script:Migrated) {
+        foreach ($rel in $script:Legacy.Keys) {
+            Assert-StatePath $rel
+            $entry = $script:Legacy[$rel]
+            if (-not (Is-Sha (Prop $entry 'remote_sha256')) -or -not (Is-Sha (Prop $entry 'local_sha256'))) { Stop-Sync 'invalid legacy hashes' }
+            if ($script:Remote.ContainsKey($rel)) {
+                if (-not $script:Local.ContainsKey($rel)) { Stop-Sync "legacy migration blocked: previously synced local file missing: $rel" }
+                $r = $script:Remote[$rel]
+                $script:State[$r.id] = @{path=$rel;sha256=$entry.remote_sha256;identity=$script:LocalIds[$rel].identity}
+            } else { $script:Manifest.tombstones[$rel] = @{reason='remote_deleted';sha256=$entry.remote_sha256} }
+        }
+    }
+    Assert-CrossPaths
+    Recover-Deletes
+    if (Run-FolderMoves) { return }
+    Read-RemoteTree
+    $script:Local = Read-LocalTree
     Make-LocalFolders
-    foreach ($act in $script:Actions) {
+    Apply-RemoteDeletes
+    Plan-Sync
+    foreach ($act in @($script:Actions | Where-Object { $_.op -ne 'delete-remote' }) + @($script:Actions | Where-Object { $_.op -eq 'delete-remote' })) {
         switch ($act.op) {
             'adopt' {
-                if ($script:DryRun) { Log "ADOPT $($act.rel) (dry-run)" }
-                else {
-                    $rsha = $script:Remote[$act.rel].sha
-                    if ((Sha (Rel-Path $act.rel)) -cne $rsha) { Stop-Sync "local changed before ADOPT: $($act.rel)" }
-                    State-Set $act.rel $rsha $rsha
+                if (-not $script:DryRun) {
+                    if ((Sha (Rel-Path $act.rel)) -cne $act.baseline) { Stop-Sync 'local changed before adopt' }
+                    State-Set $act.rel $act.baseline $act.baseline
                 }
             }
             'download' { Download-Action $act.rel $false $act.baseline }
             'conflict' { Download-Action $act.rel $true $act.baseline }
-            'upload' { Upload-Action $act.rel ([string]$act.baseline) $true }
-            'replace' { Upload-Action $act.rel ([string]$act.baseline) $false }
-            default { Stop-Sync "unknown action: $($act.op)" }
+            'upload' { Upload-Action $act.rel $act.baseline $true }
+            'replace' { Upload-Action $act.rel $act.baseline $false }
+            'move-local' {
+                Move-Local $act.src $act.rel $false
+                if (-not $script:DryRun) {
+                    $script:State[$act.fid].path = $act.rel
+                    $script:State[$act.fid].identity = Local-Identity (Rel-Path $act.rel)
+                    Save-State
+                }
+            }
+            'move-remote' {
+                if ($script:DryRun) { Log "MOVE-REMOTE-FILE $($act.rel) -> $($act.dest) (dry-run)"; continue }
+                $r = $script:Remote[$act.rel]
+                if (-not [IO.File]::Exists((Rel-Path $act.dest)) -or (Sha (Rel-Path $act.dest)) -cne $act.baseline) { Stop-Sync 'local move destination changed before file_update' }
+                Remote-Match $act.rel $r
+                $folder = Remote-EnsureFolder (Parent-Rel $act.dest)
+                Remote-Match $act.dest $null
+                $null = Api-Call -Method POST -Action file_update -Body @{file_id=$r.id;name=(Leaf-Rel $act.dest);folder_id=$(if ($folder) {$folder} else {$null})}
+                $script:Remote.Remove($act.rel) | Out-Null
+                $script:Remote[$act.dest] = @{id=$r.id;sha=$r.sha;folder=$folder}
+                Remote-Match $act.dest $script:Remote[$act.dest]
+                State-Set $act.dest $r.sha $act.baseline
+                Log "MOVE-REMOTE-FILE $($act.rel) -> $($act.dest) (file_id preserved)"
+                $script:Counts.moves++
+            }
+            'delete-remote' { Delete-Remote $act.rel }
+            default { Stop-Sync "unknown action $($act.op)" }
         }
     }
-    Log "telmi-files-sync done: folders=$($script:Counts.folders) downloads=$($script:Counts.downloads) uploads=$($script:Counts.uploads) conflicts=$($script:Counts.conflicts) skipped=$($script:Counts.skipped) errors=0"
+    if (-not $script:DryRun) { Refresh-FolderState; Save-State }
+    Log ('telmi-files-sync done: ' + (($script:Counts.Keys | Sort-Object | ForEach-Object { "$_=$($script:Counts[$_])" }) -join ' ') + ' errors=0')
+}
+
+# v6 identity/move/delete helpers. File identities survive ordinary NTFS renames.
+function Convert-Map($Value) {
+    if ($Value -is [pscustomobject]) {
+        $result = New-Dict
+        foreach ($p in $Value.PSObject.Properties) { $result[$p.Name] = Convert-Map $p.Value }
+        return ,$result
+    }
+    return ,$Value
+}
+function Assert-StatePath($Rel) {
+    if ($Rel -isnot [string] -or -not $Rel) { Stop-Sync 'invalid manifest path' }
+    $null = Rel-Path $Rel
+    foreach ($part in $Rel.Split('/')) {
+        if ($part.StartsWith('.telmi-', [StringComparison]::OrdinalIgnoreCase) -or $part -ceq [string]$Config.STATE_FILE) { Stop-Sync 'reserved manifest path' }
+    }
+}
+function Assert-ArchivePath($Rel) {
+    if ($Rel -isnot [string] -or -not $Rel.StartsWith('.telmi-deleted/', [StringComparison]::Ordinal)) { Stop-Sync 'invalid archive path' }
+    $null = Rel-Path $Rel
+}
+function Assert-RemoteName([string]$Name) {
+    if ($Name.StartsWith('.telmi-', [StringComparison]::OrdinalIgnoreCase) -or $Name -ceq '.DS_Store' -or $Name.IndexOf('.conflict-', [StringComparison]::OrdinalIgnoreCase) -ge 0) { Stop-Sync "remote name would be excluded: $Name" }
+}
+function Local-Identity([string]$Path) { return [TelmiFileIdentity]::Get($Path) }
+function Find-Local($Record, $Paths) {
+    $identity = Prop $Record 'identity'
+    $hits = @($Paths.Keys | Where-Object { $identity -and (Prop $Paths[$_] 'identity') -ceq $identity })
+    if ($hits.Count -gt 1) { Stop-Sync 'filesystem identity at multiple paths; hard links unsupported' }
+    if ($hits.Count -eq 1) { return [string]$hits[0] }
+    if ($Paths.ContainsKey($Record.path)) { return [string]$Record.path }
+    return $null
+}
+function Remote-PathForId([string]$Id) {
+    foreach ($p in $script:Remote.Keys) { if ($script:Remote[$p].id -ceq $Id) { return [string]$p } }
+    return $null
+}
+function Assert-CrossPaths {
+    $names = New-Dict
+    foreach ($p in @($script:Remote.Keys) + @($script:Folders.Keys)) { $names[(Canon $p)] = $p }
+    foreach ($p in @($script:Local.Keys) + @($script:LocalDirs.Keys)) {
+        if ($names.ContainsKey((Canon $p)) -and $names[(Canon $p)] -cne $p) { Stop-Sync "case/Unicode mismatch: $p" }
+        if (($script:Remote.ContainsKey($p) -and $script:LocalDirs.ContainsKey($p)) -or ($script:Folders.ContainsKey($p) -and $script:Local.ContainsKey($p))) { Stop-Sync "file/folder collision: $p" }
+    }
+}
+function Move-Local([string]$Src, [string]$Dest, [bool]$Directory) {
+    $from = Rel-Path $Src; $to = Rel-Path $Dest
+    if ([IO.File]::Exists($to) -or [IO.Directory]::Exists($to)) { Stop-Sync "move destination occupied: $Dest" }
+    if ($script:DryRun) { Log "MOVE-LOCAL $Src -> $Dest (dry-run)"; return }
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($to)) | Out-Null
+    if ($Directory) { [IO.Directory]::Move($from, $to) } else { [IO.File]::Move($from, $to) }
+    $script:Counts.moves++
+    Log "MOVE-LOCAL $Src -> $Dest"
+}
+function Rewrite-StatePaths([string]$From, [string]$To) {
+    foreach ($section in @('files','folders')) {
+        foreach ($rec in $script:Manifest[$section].Values) {
+            if ($rec.path -ceq $From) { $rec.path = $To }
+            elseif ($rec.path.StartsWith($From + '/', [StringComparison]::Ordinal)) { $rec.path = $To + $rec.path.Substring($From.Length) }
+        }
+    }
+    foreach ($p in @($script:Manifest.tombstones.Keys)) {
+        if ($p -ceq $From -or $p.StartsWith($From + '/', [StringComparison]::Ordinal)) {
+            $dest = $To + $p.Substring($From.Length)
+            if ($script:Manifest.tombstones.ContainsKey($dest)) { Stop-Sync 'tombstone collision after folder move' }
+            $script:Manifest.tombstones[$dest] = $script:Manifest.tombstones[$p]
+            $script:Manifest.tombstones.Remove($p) | Out-Null
+        }
+    }
+}
+function Refresh-FolderState {
+    $null = Read-LocalTree
+    $seen = New-Dict
+    foreach ($p in $script:Folders.Keys) {
+        if (-not $p) { continue }
+        $id = [string]$script:Folders[$p]; $seen[$id] = $true
+        $identity = if ($script:LocalDirs.ContainsKey($p)) { $script:LocalDirs[$p].identity } else { $null }
+        $script:Manifest.folders[$id] = @{path=$p;identity=$identity}
+    }
+    foreach ($id in @($script:Manifest.folders.Keys)) { if (-not $seen.ContainsKey($id)) { $script:Manifest.folders.Remove($id) | Out-Null } }
+}
+function Run-FolderMoves {
+    $rounds = $script:Manifest.folders.Count + 3
+    for ($round = 0; $round -lt $rounds; $round++) {
+        $changed = $false
+        foreach ($fid in @($script:Manifest.folders.Keys | Sort-Object { $script:Manifest.folders[$_].path.Length })) {
+            $old = $script:Manifest.folders[$fid]; $rp = $null
+            foreach ($p in $script:Folders.Keys) { if ($script:Folders[$p] -ceq $fid) { $rp = $p; break } }
+            if ($null -eq $rp) { continue }
+            $lp = Find-Local $old $script:LocalDirs
+            if ($rp -cne $old.path) {
+                if ($script:Mode -eq 'push') { continue }
+                if ($null -ne $lp -and $lp -ceq $old.path -and (Prop $old 'identity') -and $old.identity -cne $script:LocalDirs[$lp].identity) { Stop-Sync 'remote folder moved but local source was replaced' }
+                if ($null -eq $lp) {
+                    foreach ($p in $script:Remote.Keys) { if ($p.StartsWith($rp + '/', [StringComparison]::Ordinal)) { $script:ForceRestore[$script:Remote[$p].id] = $true } }
+                }
+                if ($null -ne $lp -and $lp -cne $rp) { Move-Local $lp $rp $true }
+                if ($script:DryRun) { Log 'DRY-RUN: folder move listed; rerun after applying it for remaining file actions'; return $true }
+                Rewrite-StatePaths $old.path $rp
+                $changed = $true
+            } elseif ($null -ne $lp -and $lp -cne $rp) {
+                if ($script:Mode -eq 'pull') { Move-Local $lp $rp $true }
+                else {
+                    if ($lp.StartsWith($rp + '/', [StringComparison]::Ordinal)) { Stop-Sync 'folder cannot move into itself' }
+                    if ($script:DryRun) { Log "MOVE-REMOTE-FOLDER $rp -> $lp (dry-run)"; return $true }
+                    $parent = Remote-EnsureFolder (Parent-Rel $lp)
+                    Read-RemoteTree
+                    if (-not $script:Folders.ContainsKey($rp) -or $script:Folders[$rp] -cne $fid -or $script:Folders.ContainsKey($lp)) { Stop-Sync 'remote folder changed before move' }
+                    $null = Api-Call -Method POST -Action folder_update -Body @{folder_id=$fid;name=(Leaf-Rel $lp);parent_id=$(if ($parent) {$parent} else {$null})}
+                    Read-RemoteTree
+                    if (-not $script:Folders.ContainsKey($lp) -or $script:Folders[$lp] -cne $fid) { Stop-Sync 'folder move verification failed' }
+                    Rewrite-StatePaths $rp $lp
+                    $script:Counts.moves++
+                    Log "MOVE-REMOTE-FOLDER $rp -> $lp (folder_id preserved)"
+                }
+                if ($script:DryRun) { return $true }
+                $changed = $true
+            }
+            if ($changed) {
+                Save-State
+                Read-RemoteTree
+                $script:Local = Read-LocalTree
+                break
+            }
+        }
+        if (-not $changed) { return $false }
+    }
+    Stop-Sync 'folder move detection did not converge'
+}
+function Apply-RemoteDeletes {
+    if ($script:Mode -eq 'push') { return }
+    $candidates = New-Dict; $missing = @()
+    foreach ($fid in @($script:State.Keys)) {
+        if ($null -eq (Remote-PathForId $fid)) {
+            $missing += $fid
+            $lp = Find-Local $script:State[$fid] $script:LocalIds
+            if ($null -ne $lp) { $candidates[$lp] = $true }
+        }
+    }
+    $oldTombstones = @()
+    foreach ($p in @($script:Manifest.tombstones.Keys)) {
+        $rec = $script:Manifest.tombstones[$p]
+        if ($rec.reason -ceq 'remote_deleted' -and -not $script:Remote.ContainsKey($p) -and $null -eq (Remote-PathForId ([string](Prop $rec 'file_id')))) {
+            $oldTombstones += $p
+            if ($script:Local.ContainsKey($p)) { $candidates[$p] = $true }
+        }
+    }
+    foreach ($p in $candidates.Keys) {
+        $path = Rel-Path $p
+        if (-not [IO.File]::Exists($path)) { Stop-Sync "remote deletion target changed: $p" }
+        if (-not $script:DryRun) { [IO.File]::Delete($path) }
+        Log "DELETE-LOCAL $p (server deleted; no archive)$(if ($script:DryRun) {' (dry-run)'})"
+        $script:Counts.local_deletes++
+        $script:Local.Remove($p) | Out-Null
+        $script:LocalIds.Remove($p) | Out-Null
+    }
+    foreach ($fid in $missing) { $script:State.Remove($fid) | Out-Null }
+    foreach ($p in $oldTombstones) { $script:Manifest.tombstones.Remove($p) | Out-Null }
+    Save-State
+}
+function Finish-Delete([string]$Fid) {
+    $pending = $script:Manifest.pending_deletes[$Fid]
+    $script:Manifest.tombstones[$pending.path] = @{reason='local_deleted';file_id=$Fid;sha256=$pending.sha256;archive=$pending.archive}
+    $script:Manifest.pending_deletes.Remove($Fid) | Out-Null
+    $script:State.Remove($Fid) | Out-Null
+    Save-State
+}
+function Recover-Deletes {
+    foreach ($fid in @($script:Manifest.pending_deletes.Keys)) {
+        $pending = $script:Manifest.pending_deletes[$fid]
+        $path = Rel-Path $pending.archive
+        if (-not [IO.File]::Exists($path) -or (Sha $path) -cne $pending.sha256) { Stop-Sync 'pending deletion archive missing/corrupt' }
+        if ($null -ne (Remote-PathForId $fid)) { Stop-Sync 'pending delete still exists remotely; archive safe; manual resolution required' }
+        if (-not $script:DryRun) { Finish-Delete $fid }
+        Log "RECOVER-COMMITTED-DELETE $($pending.path)"
+    }
+}
+function Delete-Remote([string]$Rel) {
+    if ($script:DryRun) { Log "ARCHIVE+DELETE-REMOTE $Rel (dry-run)"; $script:Counts.deletes++; return }
+    $remote = $script:Remote[$Rel]
+    Read-RemoteTree
+    if ($script:Remote.Count -le 1) { Stop-Sync 'delete would leave remote space empty' }
+    if ([IO.File]::Exists((Rel-Path $Rel)) -or [IO.Directory]::Exists((Rel-Path $Rel))) { Stop-Sync 'local file reappeared before delete' }
+    Remote-Match $Rel $remote
+    $archive = '.telmi-deleted/' + (Get-Date -Format yyyy-MM-dd) + '/' + [Guid]::NewGuid().ToString('N') + '/' + $Rel
+    $dest = Rel-Path $archive
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($dest)) | Out-Null
+    $archiveRoot = [IO.DirectoryInfo]::new((Rel-Path '.telmi-deleted'))
+    $archiveRoot.Attributes = $archiveRoot.Attributes -bor [IO.FileAttributes]::Hidden
+    Api-Call -Method GET -Action content -Query @{file_id=$remote.id} -DownloadTo $dest -RetryGet
+    $flush = [IO.File]::Open($dest, 'Open', 'ReadWrite', 'None')
+    try { $flush.Flush($true) } finally { $flush.Dispose() }
+    if ((Sha $dest) -cne $remote.sha) { Stop-Sync 'archive checksum mismatch; delete refused' }
+    Remote-Match $Rel $remote
+    if ([IO.File]::Exists((Rel-Path $Rel)) -or [IO.Directory]::Exists((Rel-Path $Rel))) { Stop-Sync 'local file reappeared during archive' }
+    $script:Manifest.pending_deletes[$remote.id] = @{path=$Rel;sha256=$remote.sha;archive=$archive}
+    Save-State
+    $null = Api-Call -Method POST -Action file_delete -Body @{file_id=$remote.id}
+    $listing = Api-List ([string]$script:Folders[(Parent-Rel $Rel)])
+    if (@($listing.files | Where-Object { (Prop $_ 'file_id') -ceq $remote.id }).Count) { Stop-Sync 'delete verification failed' }
+    Finish-Delete $remote.id
+    $script:Counts.deletes++
+    Log "DELETE-REMOTE $Rel (archived $archive)"
 }
 
 # --- MAIN --------------------------------------------------------------------
@@ -590,7 +866,37 @@ try {
     $script:RetryDelay = Parse-Int 'HTTP_RETRY_SLEEP' 0 600
     $script:ReadTimeout = Parse-Int 'HTTP_READ_TIMEOUT' 1 86400
     $script:TransferTimeout = Parse-Int 'HTTP_TRANSFER_TIMEOUT' 1 86400
-    $script:Counts = @{folders=0;downloads=0;uploads=0;conflicts=0;skipped=0}
+    $script:MaxDeletes = Parse-Int 'MAX_LOCAL_DELETES_PER_RUN' 1 100000
+    $script:MaxDeletePercent = Parse-Int 'MAX_LOCAL_DELETE_PERCENT' 1 100
+    $script:Counts = @{folders=0;downloads=0;uploads=0;conflicts=0;skipped=0;moves=0;deletes=0;local_deletes=0}
+
+if (-not ('TelmiFileIdentity' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class TelmiFileIdentity {
+    [StructLayout(LayoutKind.Sequential)] struct Info {
+        public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Creation, Access, Write;
+        public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+    }
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security, uint mode, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool GetFileInformationByHandle(SafeFileHandle handle, out Info info);
+    public static string Get(string path) {
+        using (SafeFileHandle h = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+            if (h.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            Info info;
+            if (!GetFileInformationByHandle(h, out info)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            return info.Volume.ToString("X8") + ":" + info.IndexHigh.ToString("X8") + info.IndexLow.ToString("X8");
+        }
+    }
+}
+'@
+}
+
     Log "telmi-files-sync start mode=$($script:Mode) dry_run=$([int]$script:DryRun) space=$($script:SpaceId)"
     # Exclusive OS file lock: held open with FileShare.None; automatically
     # released on process exit/crash, no unsafe stale-lock deletion or PID reuse.
@@ -605,6 +911,8 @@ try {
     catch [IO.IOException] { Stop-Sync "another sync is running or lock unavailable ($lockPath)" }
     $script:WorkDir = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'telmi-files-sync-' + [Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($script:WorkDir) | Out-Null
+    Add-Type -AssemblyName System.Net.Http
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $handler = [Net.Http.HttpClientHandler]::new()
     $handler.AllowAutoRedirect = $false  # don't disclose bearer JWT via redirects
     $script:Http = [Net.Http.HttpClient]::new($handler)

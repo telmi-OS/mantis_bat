@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-VERSION="${1:-1.0.0}"
+VERSION="${1:-1.1.0}"
 ROOT_DIR="$(cd "$(dirname "$0")/../../../.." && pwd)"
 MODULE_DIR="$ROOT_DIR/tools/files-sync/php"
 DIST_DIR="$ROOT_DIR/dist"

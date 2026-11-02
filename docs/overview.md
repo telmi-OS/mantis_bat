@@ -94,7 +94,7 @@ The Ghost Eval tool is another standalone utility flow:
 
 The Files space is configured separately from chat memory. Challenge chats stay in the Ghost's personal conversation context; selected group IDs are sent as `active_groups` to add their memories when RAG is enabled.
 
-The Files Sync tool has a different deployment boundary: Hades serves its PHP guide page, while the chosen computer runs the downloaded client with its own Ghost JWT, Files-space ID, local directory, and schedule. The guide page has no sign-in or installer and never receives the JWT.
+The Files Sync tool has a different deployment boundary: Hades serves its PHP guide page, while the chosen computer runs the downloaded v6 client with its own Ghost JWT, Files-space ID, local directory, and schedule. The guide page has no sign-in or installer and never receives the JWT. The clients preserve IDs for recognized moves and propagate file deletions for previously synchronized content: when the server copy is unchanged, a local deletion archives verified bytes before deleting remotely; if it changed, server wins and is restored. Server deletions remove tracked local copies without an archive. Empty folder deletion is not propagated. See [Files Sync Tool](files-sync-tool.md) for the safeguards and mode behavior.
 
 ## Why Teleport AI Publishes This
 
