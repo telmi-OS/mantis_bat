@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible problem in Mantis Bat or one of its tools.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report one problem per issue. Do not include Ghost JWTs, bot tokens, passwords, customer data, or unredacted logs. For security vulnerabilities, use the private route in [SECURITY.md](https://github.com/telmi-OS/mantis_bat/security/policy).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Telegram connector
+        - RAG Prep
+        - Ghost Eval
+        - Nextcloud Talk Connect
+        - Files Sync for macOS or Windows
+        - Files Sync for AWS S3
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Include the release version or commit, if known.
+      placeholder: 1.2.3 or abc1234
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include relevant runtime, operating system, and hosting details. Redact identifiers and private data.
+      render: text
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest set of steps that reproduces the problem.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+      description: State what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Paste a short, redacted excerpt. Remove credentials, personal data, and customer content.
+      render: text

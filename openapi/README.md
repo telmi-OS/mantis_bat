@@ -4,8 +4,8 @@ This directory tracks source references and local notes for the public Ghost API
 
 Primary reference:
 
-- https://portal.swaggerhub.com/apis/teleportaisolutionsl/ghost-api-v2/2.0.0
+- Apidog interactive specification: https://idsfu8yxg1.apidog.io/
 
-Direct OpenAPI JSON used during implementation:
+Direct OpenAPI JSON mirror:
 
 - https://teleport-ai.com/assets/api/ghost-api-v2.openapi.json

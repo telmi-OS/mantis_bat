@@ -1,7 +1,7 @@
 Ghost API v2 source references used for this repository:
 
-- SwaggerHub page:
-  https://portal.swaggerhub.com/apis/teleportaisolutionsl/ghost-api-v2/2.0.0
+- Official interactive API specification (Apidog):
+  https://idsfu8yxg1.apidog.io/
 
 - Public OpenAPI JSON:
   https://teleport-ai.com/assets/api/ghost-api-v2.openapi.json

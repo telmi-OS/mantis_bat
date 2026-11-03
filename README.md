@@ -135,6 +135,8 @@ This repository matters because open connector work should be buildable by the c
 
 If you want to build serious AI products on top of `telmi OS`, this is the repo for that work.
 
+Community contributions are welcome. Use [GitHub Discussions](https://github.com/telmi-OS/mantis_bat/discussions) for questions and early ideas, [GitHub Issues](https://github.com/telmi-OS/mantis_bat/issues) for bugs and concrete feature proposals, and [pull requests](https://github.com/telmi-OS/mantis_bat/pulls) to propose changes. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Teleport AI maintainers review and decide which changes are merged and released.
+
 Build:
 
 - connectors
@@ -166,7 +168,7 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 
 - Teleport AI: https://teleport-ai.com
 - telmi OS Resources: https://teleport-ai.com/resources.html#docs
-- Ghost API v2: https://portal.swaggerhub.com/apis/teleportaisolutionsl/ghost-api-v2/2.0.0
+- Ghost API v2 interactive specification (Apidog): https://idsfu8yxg1.apidog.io/
 - Telegram Bot API: https://core.telegram.org/bots/api
 - Telegram BotFather: https://core.telegram.org/bots/features#botfather
 

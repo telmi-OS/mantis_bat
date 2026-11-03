@@ -1,0 +1,42 @@
+name: Feature proposal
+description: Propose a concrete capability or improvement.
+title: "[Proposal]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For early-stage ideas or questions, start in [GitHub Discussions](https://github.com/telmi-OS/mantis_bat/discussions). Use this form when you can describe the problem and proposed outcome.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Telegram connector
+        - RAG Prep
+        - Ghost Eval
+        - Nextcloud Talk Connect
+        - Files Sync for macOS or Windows
+        - Files Sync for AWS S3
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Who is affected, and what are they trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the behavior or result you would like.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and constraints
+      description: Mention workarounds, compatibility concerns, or security implications, if relevant.

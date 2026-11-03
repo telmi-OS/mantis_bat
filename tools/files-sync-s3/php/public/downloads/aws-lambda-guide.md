@@ -285,6 +285,7 @@ The no-auth Mantis Bat page hosts this guide and the deployment downloads. It do
 
 ## References
 
+- [Official interactive Ghost API v2 specification (Apidog)](https://idsfu8yxg1.apidog.io/)
 - [Telmi Ghost API v2 OpenAPI](https://teleport-ai.com/assets/api/ghost-api-v2.openapi.json)
 - [AWS Lambda Python runtimes and included SDK](https://docs.aws.amazon.com/lambda/latest/dg/lambda-python.html)
 - [AWS S3 DeleteObject, conditional headers and versioning](https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html)
