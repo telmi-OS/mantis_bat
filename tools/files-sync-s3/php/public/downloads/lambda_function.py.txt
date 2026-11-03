@@ -45,6 +45,11 @@ class SyncError(RuntimeError):
     pass
 
 
+class UnsupportedFileType(SyncError):
+    """A definite HTTP 415 rejection of an upload or replacement."""
+    pass
+
+
 def stop(message):
     raise SyncError(message)
 
@@ -387,6 +392,15 @@ class GhostClient:
             body = response.read(1024 * 1024 + 1)
             if len(body) > 1024 * 1024:
                 stop(f"Ghost {action} returned oversized response")
+            if status == 415 and action in ("upload", "file_replace"):
+                reason = "This file type is not allowed"
+                try:
+                    error = json.loads(body)
+                    if isinstance(error, dict):
+                        reason = str(error.get("error") or error.get("message") or reason)[:240]
+                except (ValueError, UnicodeError):
+                    pass
+                raise UnsupportedFileType(reason)
             if not 200 <= status < 300:
                 stop(f"HTTP {status} Ghost {action}; server-wins hard abort; no automatic write retries")
             return json_body(body, f"Ghost API {action}")
@@ -742,6 +756,10 @@ class Sync:
                 if sha != sh:
                     stop(f"S3 source changed before upload {rel}")
                 self.ghost.upload(source, rel, folder_id)
+            except UnsupportedFileType as exc:
+                LOG.warning("SKIP %s (HTTP 415: %s)", rel, exc)
+                self.count["skipped"] += 1
+                return
             finally:
                 os.unlink(source)
             remote_new = self.verify_remote(rel, expected_sha=sh, expected_id=None)
@@ -800,6 +818,10 @@ class Sync:
                     stop("S3 source changed before file_replace")
                 self.verify_remote(rel, r["sha"], r["id"])
                 self.ghost.replace(source, rel, r)
+            except UnsupportedFileType as exc:
+                LOG.warning("SKIP %s (HTTP 415: %s)", rel, exc)
+                self.count["skipped"] += 1
+                return
             finally:
                 os.unlink(source)
             new_remote = self.verify_remote(rel, expected_sha=sh, expected_id=r["id"])

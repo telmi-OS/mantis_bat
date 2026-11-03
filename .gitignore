@@ -55,3 +55,4 @@ node_modules/
 dist/
 release/
 *.zip
+!tools/files-sync-s3/php/public/downloads/telmi-s3-lambda-deploy.zip
