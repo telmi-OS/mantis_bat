@@ -70,6 +70,7 @@ final class EvaluationRunner
         $id = bin2hex(random_bytes(12));
         $created = date(DATE_ATOM);
         $notifications = $this->config->get('notifications', []);
+        if (!is_array($notifications)) $notifications = [];
         $activeGroups = $this->config->get('evaluation.active_groups', []);
         if (!is_array($activeGroups)) $activeGroups = [];
         $activeGroups = array_values(array_unique(array_filter($activeGroups, static fn($groupId): bool => is_string($groupId) && trim($groupId) !== '')));
@@ -81,7 +82,12 @@ final class EvaluationRunner
             'active_groups' => $activeGroups,
             'use_rag' => (bool) $this->config->get('evaluation.use_rag', true),
             'use_history' => (bool) $this->config->get('evaluation.use_history', false),
-            'notifications' => is_array($notifications) ? $notifications : [],
+            'notifications' => $notifications,
+            'agentic_start_status' => null,
+            'agentic_ready' => false,
+            'agentic_setup_failed' => false,
+            'agentic_restore_required' => false,
+            'agentic_resume_phase' => '',
             'ghost_api_base' => (string) $this->config->get('ghost.api_base', ''),
             'started_at' => $created,
         ];
@@ -91,9 +97,11 @@ final class EvaluationRunner
                 'verdict' => '', 'rationale' => '', 'error' => '',
             ], $normalized),
             'notification_errors' => [],
+            'agentic_errors' => [],
             'report_error' => '',
         ];
         $notifyStart = ($notifications['enabled'] ?? false) && ($notifications['on_start'] ?? false);
+        $manageAgentic = $this->notificationsConfigured($notifications);
         $this->storage->createRun([
             'id' => $id,
             'suite_file_id' => $fileId,
@@ -102,7 +110,7 @@ final class EvaluationRunner
             'suite_json' => json_encode(['title' => $suiteTitle, 'cases' => $normalized], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             'settings' => $settings,
             'results' => $initialResults,
-            'phase' => $notifyStart ? 'notify_start' : 'target',
+            'phase' => $manageAgentic ? 'agentic_prepare' : ($notifyStart ? 'notify_start' : 'target'),
             'created_at' => $created,
         ]);
         return $id;
@@ -128,11 +136,72 @@ final class EvaluationRunner
         $index = (int) $run['case_index'];
         $phase = (string) $run['phase'];
 
-        if ($phase === 'notify_start') {
+        if ($phase === 'agentic_prepare') {
+            try {
+                $agenticStartStatus = $client->agenticEnabled();
+                $run['settings']['agentic_start_status'] = $agenticStartStatus;
+                $run['settings']['agentic_ready'] = $agenticStartStatus;
+                if ($agenticStartStatus) {
+                    $run['phase'] = ($run['settings']['notifications']['on_start'] ?? false) ? 'notify_start' : 'target';
+                } else {
+                    $run['settings']['agentic_restore_required'] = true;
+                    $run['settings']['agentic_resume_phase'] = ($run['settings']['notifications']['on_start'] ?? false) ? 'notify_start' : 'target';
+                    $run['phase'] = 'agentic_enable';
+                }
+            } catch (\Throwable $exception) {
+                $this->recordAgenticError($run, 'Could not read Agentic status: ' . $exception->getMessage());
+                $run['settings']['agentic_setup_failed'] = true;
+                $run['phase'] = 'target';
+            }
+        } elseif ($phase === 'agentic_enable') {
+            try {
+                if (!$client->setAgenticEnabled(true)) {
+                    throw new RuntimeException('Ghost API did not enable Agentic.');
+                }
+                $run['settings']['agentic_ready'] = true;
+                $run['phase'] = $this->agenticResumePhase($run, 'target');
+            } catch (\Throwable $exception) {
+                $this->recordAgenticError($run, 'Could not enable Agentic: ' . $exception->getMessage());
+                $run['settings']['agentic_setup_failed'] = true;
+                $run['settings']['agentic_ready'] = false;
+                if ($this->settingsUpdateWasRejected($exception)) {
+                    $run['settings']['agentic_restore_required'] = false;
+                    $run['settings']['agentic_resume_phase'] = '';
+                    $run['phase'] = 'target';
+                } else {
+                    $run['settings']['agentic_resume_phase'] = 'target';
+                    $run['phase'] = 'agentic_restore';
+                }
+            }
+        } elseif ($phase === 'agentic_restore') {
+            $agenticStartStatus = $run['settings']['agentic_start_status'] ?? null;
+            if (!is_bool($agenticStartStatus)) {
+                $this->recordAgenticError($run, 'Cannot restore Agentic because its starting status was not recorded.');
+                $run['settings']['agentic_restore_required'] = false;
+                $run['settings']['agentic_setup_failed'] = true;
+                $run['phase'] = $this->agenticResumePhase($run, 'finish');
+            } else {
+                try {
+                    if ($client->setAgenticEnabled($agenticStartStatus) !== $agenticStartStatus) {
+                        throw new RuntimeException('Ghost API returned a different Agentic status during restoration.');
+                    }
+                    $run['settings']['agentic_restore_required'] = false;
+                    $run['settings']['agentic_ready'] = $agenticStartStatus;
+                    $run['phase'] = $this->agenticResumePhase($run, 'finish');
+                    $run['settings']['agentic_resume_phase'] = '';
+                } catch (\Throwable $exception) {
+                    $this->recordAgenticError($run, 'Could not restore Agentic; the worker will retry: ' . $exception->getMessage());
+                    $run['phase'] = 'agentic_restore';
+                    $run['updated_at'] = date(DATE_ATOM);
+                    $this->storage->saveRun($run);
+                    return ['ok' => false, 'processed' => true, 'run_id' => $run['id'], 'phase' => $run['phase'], 'status' => $run['status'], 'error' => 'Agentic restoration failed; the worker will retry.'];
+                }
+            }
+        } elseif ($phase === 'notify_start') {
             try {
                 $client->chat($this->notificationPrompt($run, 'started'), false, false);
             } catch (\Throwable $exception) {
-                $run['results']['notification_errors'][] = 'Start notice: ' . $exception->getMessage();
+                $this->recordNotificationError($run, 'Start notice: ' . $exception->getMessage());
             }
             $run['phase'] = 'target';
         } elseif ($phase === 'target') {
@@ -198,14 +267,26 @@ final class EvaluationRunner
                     $run['results']['report_error'] = $exception->getMessage();
                 }
             }
-            $run['phase'] = $this->shouldNotifyEnd($run) ? 'notify_end' : 'finish';
+            if ($this->shouldNotifyEnd($run)) {
+                $run['phase'] = 'notify_end';
+            } elseif (!empty($run['settings']['agentic_restore_required'])) {
+                $run['settings']['agentic_resume_phase'] = 'finish';
+                $run['phase'] = 'agentic_restore';
+            } else {
+                $run['phase'] = 'finish';
+            }
         } elseif ($phase === 'notify_end') {
             try {
                 $client->chat($this->notificationPrompt($run, 'finished'), false, false);
             } catch (\Throwable $exception) {
-                $run['results']['notification_errors'][] = 'Finish notice: ' . $exception->getMessage();
+                $this->recordNotificationError($run, 'Finish notice: ' . $exception->getMessage());
             }
-            $run['phase'] = 'finish';
+            if (!empty($run['settings']['agentic_restore_required'])) {
+                $run['settings']['agentic_resume_phase'] = 'finish';
+                $run['phase'] = 'agentic_restore';
+            } else {
+                $run['phase'] = 'finish';
+            }
         } elseif ($phase === 'finish') {
             $run['status'] = $this->hasOperationalErrors($run) ? 'completed_with_errors' : 'completed';
             $run['finished_at'] = date(DATE_ATOM);
@@ -392,6 +473,8 @@ final class EvaluationRunner
     {
         $n = $run['settings']['notifications'] ?? [];
         if (!($n['enabled'] ?? false)) return false;
+        if (array_key_exists('agentic_ready', $run['settings'])
+            && (!($run['settings']['agentic_ready'] ?? false) || ($run['settings']['agentic_setup_failed'] ?? false))) return false;
         if ($n['on_finish'] ?? false) return true;
         if (($n['on_errors'] ?? false) && $this->hasOperationalErrors($run)) return true;
         return ($n['on_p0_failures'] ?? false) && $this->hasP0Failure($run);
@@ -427,11 +510,58 @@ final class EvaluationRunner
 
     private function hasOperationalErrors(array $run): bool
     {
-        if (($run['results']['report_error'] ?? '') !== '' || !empty($run['results']['notification_errors'])) return true;
+        if (($run['results']['report_error'] ?? '') !== '' || !empty($run['results']['notification_errors']) || !empty($run['results']['agentic_errors'])) return true;
         foreach (($run['results']['cases'] ?? []) as $result) {
             if (($result['status'] ?? '') === 'error') return true;
         }
         return false;
+    }
+
+    private function notificationsConfigured(array $notifications): bool
+    {
+        if (!($notifications['enabled'] ?? false)) return false;
+        foreach (['on_start', 'on_finish', 'on_errors', 'on_p0_failures'] as $event) {
+            if ($notifications[$event] ?? false) return true;
+        }
+        return false;
+    }
+
+    private function agenticResumePhase(array $run, string $default): string
+    {
+        $phase = (string) ($run['settings']['agentic_resume_phase'] ?? '');
+        return in_array($phase, ['notify_start', 'target', 'finish'], true) ? $phase : $default;
+    }
+
+    private function settingsUpdateWasRejected(\Throwable $exception): bool
+    {
+        return preg_match('/Ghost API request failed \((?:400|401|403)\)/', $exception->getMessage()) === 1;
+    }
+
+    private function recordAgenticError(array &$run, string $message): void
+    {
+        $safe = preg_replace('/Bearer\s+\S+/i', 'Bearer [REDACTED]', $message) ?? 'Agentic setting operation failed.';
+        $safe = substr($safe, 0, 500);
+        $errors = is_array($run['results']['agentic_errors'] ?? null) ? $run['results']['agentic_errors'] : [];
+        if ($errors === [] || end($errors) !== $safe) $errors[] = $safe;
+        $run['results']['agentic_errors'] = array_slice($errors, -10);
+        $this->writeRunLog($run, $safe);
+    }
+
+    private function recordNotificationError(array &$run, string $message): void
+    {
+        $safe = preg_replace('/Bearer\s+\S+/i', 'Bearer [REDACTED]', $message) ?? 'Notification failed.';
+        $safe = substr($safe, 0, 500);
+        $errors = is_array($run['results']['notification_errors'] ?? null) ? $run['results']['notification_errors'] : [];
+        $errors[] = $safe;
+        $run['results']['notification_errors'] = array_slice($errors, -10);
+        $this->writeRunLog($run, $safe);
+    }
+
+    private function writeRunLog(array $run, string $message): void
+    {
+        $message = str_replace(["\r", "\n"], ' ', $message);
+        @file_put_contents($this->installer->logPath(), '[' . date(DATE_ATOM) . '] Run ' . substr((string) $run['id'], 0, 8) . ': ' . $message . "\n", FILE_APPEND | LOCK_EX);
+        @chmod($this->installer->logPath(), 0600);
     }
 
     private function reportName(string $id): string

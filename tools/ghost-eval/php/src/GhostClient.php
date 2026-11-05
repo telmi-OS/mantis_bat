@@ -82,6 +82,26 @@ final class GhostClient
         return $this->requestJson('GET', '/settings');
     }
 
+    public function agenticEnabled(): bool
+    {
+        $body = $this->requestJson('GET', '/settings');
+        $enabled = $body['data']['agentic_enabled'] ?? null;
+        if (!is_bool($enabled)) {
+            throw new RuntimeException('Ghost settings response did not include agentic_enabled.');
+        }
+        return $enabled;
+    }
+
+    public function setAgenticEnabled(bool $enabled): bool
+    {
+        $body = $this->requestJson('POST', '/settings', ['agentic_enabled' => $enabled]);
+        $updated = $body['data']['agentic_enabled'] ?? null;
+        if (!is_bool($updated)) {
+            throw new RuntimeException('Ghost settings update response did not include agentic_enabled.');
+        }
+        return $updated;
+    }
+
     private function requestJson(string $method, string $path, ?array $payload = null, int $timeout = 20, int $connectTimeout = 5): array
     {
         $url = $this->url($path);

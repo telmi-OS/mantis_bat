@@ -80,7 +80,7 @@ Challenge settings are saved in the dashboard:
 - `use_history`: whether the challenged Ghost uses chat history for each answer
 - chat mode: always realtime
 
-The challenge uses the selected `active_groups` and the configured RAG/history flags. The judge receives `options.use_rag: false` and `options.use_history: false`, with no selected memory groups; its prompt includes the case question, reference memory extract, challenged answer, and rubric. The judge is instructed to treat the case data as quoted evidence, not as instructions.
+The challenge uses the selected `active_groups` and the configured RAG/history flags. Leave `active_groups` empty to use the Ghost’s personal context when RAG is enabled; disabling RAG retrieves no memory. The judge receives `options.use_rag: false` and `options.use_history: false`, with no selected memory groups; its prompt includes the case question, reference memory extract, challenged answer, and rubric. The judge is instructed to treat the case data as quoted evidence, not as instructions.
 
 ## Rate And Runtime Limits
 
@@ -109,9 +109,9 @@ Challenge, judge, report upload, and optional group notification steps resume fr
 
 ## Group Notifications
 
-Notifications are optional and can be enabled for run start, run finish, operational errors, and P0 case failures. The evaluator sends a normal realtime chat instruction such as `Tell Showcase Ghost Eval run ...`, without a `group_id` or `active_groups`; notifications use RAG and history disabled.
+Notifications are optional and can be enabled for run start, run finish, operational errors, and P0 case failures. The evaluator sends a normal realtime chat instruction such as `Tell Showcase Ghost Eval run ...`, without a `group_id` or `active_groups`; notifications use RAG and history disabled. When a run has notification settings enabled, the worker reads the Ghost’s `agentic_enabled` value through `GET /settings`. If it starts false, Ghost Eval enables that flag through `POST /settings`, saves the original value in the run record, and restores it after the run. Each settings request runs in its own cron tick. Read or enable errors appear in the dashboard and `storage/ghost_eval.log`; an uncertain enable result triggers restoration before the evaluation resumes. A failed restore stays in a retrying worker phase and is also shown there.
 
-> Turn on the Ghost's **Agentic** capability in its telmi OS Ghost settings before enabling group notifications. Notifications use normal “Tell GROUPNAME …” chat. Autonomous Mode and Action tools are not required.
+The Ghost Eval API token needs permission to update `/settings`. Only `agentic_enabled` is changed; other Ghost settings are left as they were. Notifications use normal “Tell GROUPNAME …” chat. Autonomous Mode is not required.
 
 ## Reports
 
