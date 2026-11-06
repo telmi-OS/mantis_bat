@@ -121,6 +121,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 'Status' => (string) $draft['base_url'] . '/status.php?key=' . rawurlencode($statusSecret),
                 'Health' => (string) $draft['base_url'] . '/health.php?key=' . rawurlencode($healthSecret),
                 'Maintenance' => (string) $draft['base_url'] . '/maintenance.php?key=' . rawurlencode($statusSecret),
+                'Installer unlock URL' => (string) $draft['base_url'] . '/install.php?unlock=' . rawurlencode($installerSecret),
                 'Installer unlock secret' => $installerSecret,
             ];
             unset($_SESSION['ghost_eval_install_draft'], $_SESSION['ghost_eval_installer_secret'], $_SESSION['ghost_eval_installer_unlocked']);
@@ -162,7 +163,19 @@ $csrf = ghostEvalCsrf($services);
         <p class="copy">Configure a Ghost, select its writable group Files space, and get private dashboard and cron URLs. Evaluation sets and Markdown reports stay in that Files space.</p>
     </section>
 
-    <?php if ($message !== ''): ?><section class="card"><h2><span class="gradient-text">Setup</span></h2><p><?= ghostEvalH($message) ?></p><?php foreach ($urls as $label => $url): ?><p><strong><?= ghostEvalH($label) ?></strong><br><code><?= ghostEvalH($url) ?></code></p><?php endforeach; ?></section><?php endif; ?>
+    <?php if ($message !== ''): ?>
+        <section class="card">
+            <h2><span class="gradient-text">Setup</span></h2>
+            <p><?= ghostEvalH($message) ?></p>
+            <?php foreach ($urls as $label => $url): ?>
+                <p><strong><?= ghostEvalH($label) ?></strong><br><code><?= ghostEvalH($url) ?></code></p>
+            <?php endforeach; ?>
+            <?php if (isset($urls['Installer unlock URL'])): ?>
+                <p class="field-help">To unlock this installer later, open the complete Installer unlock URL above over HTTPS in your browser. A valid URL unlocks the installer for that browser session; submit the installer form to replace the configuration. Treat the URL as a credential: anyone who has it can replace the configuration.</p>
+                <p class="field-help"><strong>Configuration replacement warning:</strong> installing again replaces the full Ghost Eval configuration, not only one value. Evaluation options, selected Files space, schedule, and notification settings return to their setup defaults. New dashboard, cron, status, health, maintenance, and installer unlock credentials are generated. Save the new URLs and reconfigure the dashboard and cron. Choose the same Files space to keep using the same suite and reports. Existing local run history and files already stored in Ghost Files are not deleted.</p>
+            <?php endif; ?>
+        </section>
+    <?php endif; ?>
     <?php if ($error !== ''): ?><section class="card alert-card"><h2>Setup issue</h2><p><?= ghostEvalH($error) ?></p></section><?php endif; ?>
 
     <div class="card-grid">

@@ -106,8 +106,8 @@ declare(strict_types=1);
                     </label>
                     <label>
                         Installer Unlock Secret
-                        <span class="field-help">Required only if you want to unlock and overwrite this install later.</span>
-                        <input type="text" name="installer_secret" value="">
+                        <span class="field-help">Keep this private. Open the unlock URL shown after setup to replace the configuration later. You can set your own value here.</span>
+                        <input type="text" name="installer_secret" value="<?= htmlspecialchars($defaults['installer_secret'], ENT_QUOTES, 'UTF-8') ?>" required>
                     </label>
                     <label>
                         Telegram Bot Token
@@ -158,6 +158,12 @@ declare(strict_types=1);
                 <pre><?= htmlspecialchars($maintenanceUrl, ENT_QUOTES, 'UTF-8') ?></pre>
                 <p><strong>Pairing Recovery URL</strong></p>
                 <pre><?= htmlspecialchars($pairingAdminUrl, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p><strong>Installer unlock URL</strong></p>
+                <pre><?= htmlspecialchars($installerUnlockUrl, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p><strong>Installer unlock secret</strong></p>
+                <pre><?= htmlspecialchars($installerSecretOutput, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p class="copy">To unlock this installer later, open the complete Installer unlock URL over HTTPS and submit the form while the unlock query remains in the browser address. Treat the URL as a credential: anyone who has it can replace the configuration.</p>
+                <p class="copy"><strong>Configuration replacement warning:</strong> installing again replaces the full connector configuration, including the Telegram and Ghost credentials, webhook secret, cron secret, and default group. It generates new status, health, and installer credentials, creates a fresh pairing code, and registers the Telegram webhook again. Save the new URLs and secrets, update your cron job, and update Telegram webhook settings if you changed the deployment URL. Existing local database records are not deleted by the installer.</p>
             </section>
         <?php endif; ?>
     </div>

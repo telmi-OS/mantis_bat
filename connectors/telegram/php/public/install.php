@@ -34,6 +34,8 @@ $statusUrl = '';
 $healthUrl = '';
 $maintenanceUrl = '';
 $pairingAdminUrl = '';
+$installerUnlockUrl = '';
+$installerSecretOutput = '';
 $statusSecret = '';
 $healthSecret = '';
 $unlockAllowed = false;
@@ -50,6 +52,7 @@ $defaults = [
     'app_base_url' => (string) ($_POST['app_base_url'] ?? ''),
     'app_timezone' => (string) ($_POST['app_timezone'] ?? 'Europe/Berlin'),
     'app_cron_secret' => (string) ($_POST['app_cron_secret'] ?? $security->randomToken(12)),
+    'installer_secret' => (string) ($_POST['installer_secret'] ?? $security->randomToken(10)),
     'telegram_bot_token' => (string) ($_POST['telegram_bot_token'] ?? ''),
     'telegram_webhook_secret' => (string) ($_POST['telegram_webhook_secret'] ?? $security->randomToken(12)),
     'ghost_api_base' => (string) ($_POST['ghost_api_base'] ?? 'https://dev.telmi-ai.com/api/ghost/v2'),
@@ -96,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'cron_secret' => $defaults['app_cron_secret'],
                 'status_secret' => $security->randomToken(12),
                 'health_secret' => $security->randomToken(12),
-                'installer_secret_hash' => $security->hashSecret((string) ($_POST['installer_secret'] ?? $security->randomToken(10))),
+                'installer_secret_hash' => $security->hashSecret($defaults['installer_secret']),
                 'version' => '0.1.0',
             ],
             'telegram' => [
@@ -178,6 +181,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $healthUrl = rtrim($defaults['app_base_url'], '/') . '/health.php?key=' . rawurlencode($healthSecret);
         $maintenanceUrl = rtrim($defaults['app_base_url'], '/') . '/maintenance.php?key=' . rawurlencode($statusSecret);
         $pairingAdminUrl = rtrim($defaults['app_base_url'], '/') . '/pairing.php?key=' . rawurlencode($statusSecret);
+        $installerUnlockUrl = rtrim($defaults['app_base_url'], '/') . '/install.php?unlock=' . rawurlencode($defaults['installer_secret']);
+        $installerSecretOutput = $defaults['installer_secret'];
         $message = "Install complete.\nTelegram validated.\nGhost validated.\nWebhook registered.";
     } catch (Throwable $exception) {
         if ($configWritten && !$locked) {

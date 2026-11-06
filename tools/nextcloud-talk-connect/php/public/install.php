@@ -76,6 +76,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             'Health' => $appBase . '/health.php?key=' . rawurlencode($statusSecret),
             'Maintenance' => $appBase . '/maintenance.php?key=' . rawurlencode($statusSecret),
             'Installer unlock URL' => $appBase . '/install.php?unlock=' . rawurlencode($installerSecret),
+            'Installer unlock secret' => $installerSecret,
         ];
         unset($_SESSION['nextcloud_talk_installer_secret'], $_SESSION['nextcloud_talk_installer_unlocked']);
         $_SESSION['nextcloud_talk_installed_output'] = ['urls' => $urls, 'api_key' => $apiKey];
@@ -114,7 +115,23 @@ $csrf = nextcloudTalkCsrf($services);
         <p class="copy">Connect a Nextcloud service account and expose a protected meeting-link endpoint for a telmi OS Ghost.</p>
     </section>
 
-    <?php if ($message !== ''): ?><section class="card"><h2><span class="gradient-text">Setup complete</span></h2><p><?= nextcloudTalkH($message) ?></p><?php foreach ($urls as $label => $url): ?><p><strong><?= nextcloudTalkH($label) ?></strong><br><code><?= nextcloudTalkH($url) ?></code></p><?php endforeach; ?><?php if ($apiKeyOutput !== ''): ?><p><strong>Ghost X-Auth key</strong><br><code><?= nextcloudTalkH($apiKeyOutput) ?></code></p><p class="field-help">Save this key securely. It is shown once here and used by the Ghost preset.</p><?php endif; ?></section><?php endif; ?>
+    <?php if ($message !== ''): ?>
+        <section class="card">
+            <h2><span class="gradient-text">Setup complete</span></h2>
+            <p><?= nextcloudTalkH($message) ?></p>
+            <?php foreach ($urls as $label => $url): ?>
+                <p><strong><?= nextcloudTalkH($label) ?></strong><br><code><?= nextcloudTalkH($url) ?></code></p>
+            <?php endforeach; ?>
+            <?php if ($apiKeyOutput !== ''): ?>
+                <p><strong>Ghost X-Auth key</strong><br><code><?= nextcloudTalkH($apiKeyOutput) ?></code></p>
+                <p class="field-help">Save this key securely. It is shown once here and used by the Ghost preset.</p>
+            <?php endif; ?>
+            <?php if ($setupComplete): ?>
+                <p class="field-help">To unlock this installer later, open the complete Installer unlock URL above over HTTPS. A valid URL unlocks the installer for that browser session; submit the form to replace the configuration. Treat the URL as a credential: anyone who has it can replace the configuration.</p>
+                <p class="field-help"><strong>Configuration replacement warning:</strong> installing again replaces the full configuration, including the Nextcloud credentials and meeting defaults. It generates a new Ghost X-Auth key, dashboard access key, status key, and installer unlock secret. Save the new URLs and update the Ghost preset with the new X-Auth key. Existing meeting history and deduplication data are not deleted.</p>
+            <?php endif; ?>
+        </section>
+    <?php endif; ?>
     <?php if ($error !== ''): ?><section class="card alert-card"><h2>Setup issue</h2><p><?= nextcloudTalkH($error) ?></p></section><?php endif; ?>
 
     <div class="card-grid">
