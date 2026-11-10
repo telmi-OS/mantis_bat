@@ -62,7 +62,7 @@ final class Config
         $files = [
             '/src/bootstrap.php', '/src/Config.php', '/public/index.php',
             '/public/assets/theme.css', '/public/assets/guide.js',
-            '/public/downloads/install-ghost-shell.sh.txt',
+            '/public/downloads/install-ghost-shell.sh',
             '/public/assets/images/ghost-shell-start.webp',
             '/public/assets/images/ghost-shell-end.webp',
             '/storage/config.example.php',

@@ -9,7 +9,7 @@ The PHP module only serves the guide and installer download. It does not receive
 ## Contents
 
 - `public/index.php` — Guided and Read all install guide
-- `public/downloads/install-ghost-shell.sh.txt` — text-safe Ubuntu 24.04 installer
+- `public/downloads/install-ghost-shell.sh` — Ubuntu 24.04 Bash installer
 - `public/assets/images/ghost-shell-start.webp` — optional intro image
 - `public/assets/images/ghost-shell-end.webp` — optional final image
 - `src/Config.php` and `storage/config.example.php` — optional title, timezone and local image settings

@@ -14,7 +14,7 @@ The pin adds an explicit activation step, but it does not restrict shell access 
 
 ## Files
 
-- [Installer download](../tools/ghost-shell/php/public/downloads/install-ghost-shell.sh.txt)
+- [Installer download](../tools/ghost-shell/php/public/downloads/install-ghost-shell.sh)
 - [Mantis Bat module README](../tools/ghost-shell/php/README.md)
 
 ## Requirements

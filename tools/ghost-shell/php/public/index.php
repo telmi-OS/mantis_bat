@@ -111,9 +111,9 @@ $build = $config->buildFingerprint();
             <div class="download-panel">
                 <div class="file-icon shell-file"><span>{ }</span></div>
                 <div class="download-copy"><strong>install-ghost-shell.sh</strong><span>Ubuntu 24.04 installer</span><small>Plain text source. Review it before running as root.</small></div>
-                <a class="button button-primary download-button" href="downloads/install-ghost-shell.sh.txt" download>Download installer <span aria-hidden="true">↓</span></a>
+                <a class="button button-primary download-button" href="downloads/install-ghost-shell.sh" download>Download installer <span aria-hidden="true">↓</span></a>
             </div>
-            <div class="command-card"><div class="command-head"><span>Review on the server</span><button type="button" class="copy-button" data-copy="review-script">Copy</button></div><pre id="review-script"><code>less install-ghost-shell.sh.txt</code></pre></div>
+            <div class="command-card"><div class="command-head"><span>Review on the server</span><button type="button" class="copy-button" data-copy="review-script">Copy</button></div><pre id="review-script"><code>less install-ghost-shell.sh</code></pre></div>
             <aside class="notice-card"><span class="notice-icon">!</span><p>The installer changes system configuration. If it finds an existing <code>/etc/caddy/Caddyfile</code>, it warns you and asks you to type <code>REPLACE</code> before proceeding. Confirming backs up and replaces that file; other sites configured there may stop working.</p></aside>
             <div class="slide-actions"><button class="button button-primary" type="button" data-next>Next: install the API <span aria-hidden="true">→</span></button></div>
         </div>
@@ -130,7 +130,7 @@ $build = $config->buildFingerprint();
                 <li><strong>Save the bearer token securely.</strong><span>The installer prints the token once. You will add it to the Ghost HTTP tool configuration.</span></li>
                 <li><strong>Check the health URL.</strong><span>Use the HTTPS URL printed by the installer. The health response confirms the service is running; it does not unlock command execution.</span></li>
             </ol>
-            <div class="command-card"><div class="command-head"><span>Example install command</span><button type="button" class="copy-button" data-copy="install-command">Copy</button></div><pre id="install-command"><code>sudo bash install-ghost-shell.sh.txt</code></pre></div>
+            <div class="command-card"><div class="command-head"><span>Example install command</span><button type="button" class="copy-button" data-copy="install-command">Copy</button></div><pre id="install-command"><code>sudo bash install-ghost-shell.sh</code></pre></div>
             <p class="small-note">The API listens on loopback port 8000 behind Caddy. Do not open port 8000 in the cloud firewall. The installer may allow ports 80 and 443 through UFW if it is active.</p>
             <div class="slide-actions"><button class="button button-primary" type="button" data-next>Next: unlock only when ready <span aria-hidden="true">→</span></button></div>
         </div>
@@ -187,7 +187,7 @@ $build = $config->buildFingerprint();
             <p class="eyebrow">Ghost Shell</p>
             <h2 id="finish-title">You decide when<br>the shell is open.</h2>
             <p class="lead">Review the installer, secure the server and token, and keep the activation file locked until you are ready to grant access.</p>
-            <a class="button button-primary" href="downloads/install-ghost-shell.sh.txt" download>Download the installer <span aria-hidden="true">↓</span></a>
+            <a class="button button-primary" href="downloads/install-ghost-shell.sh" download>Download the installer <span aria-hidden="true">↓</span></a>
         </div>
     </section>
 </main>
