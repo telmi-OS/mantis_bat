@@ -58,11 +58,11 @@ Each case requires `question` and `memory_extract`. It can specify `grading_rubr
 - chat requests are not automatically replayed after transport errors
 - HTTP cron requests are rate-limited to one per 50 seconds per source IP
 
-The target Ghost's RAG, selected group memories, and history settings apply only to challenge answers. Chat calls use the Ghost's personal conversation context; selected `active_groups` add group memory without changing that context. The judge uses the same Ghost with `options.use_rag: false`, `options.use_history: false`, and no selected memory groups. Since the challenged Ghost also acts as judge, the verdict is a review signal rather than independent ground truth.
+The target Ghost's RAG, selected group memories, and history settings apply only to challenge answers. Chat calls use the Ghost's personal conversation context; selected `active_groups` add group memory without changing that context. With RAG enabled and no selected groups, the Ghost uses personal-context memory only. With RAG disabled, it retrieves no memory. The judge uses the same Ghost with `options.use_rag: false`, `options.use_history: false`, and no selected memory groups. Since the challenged Ghost also acts as judge, the verdict is a review signal rather than independent ground truth.
 
 ## Group Notifications
 
-Notifications use normal realtime chat instructions such as `Tell GROUPNAME ...`; no Action tool or Autonomous Mode is needed. Turn on the Ghost's **Agentic** capability in telmi OS Ghost settings before enabling messages. Notification chat uses RAG and history disabled. Notification failures do not discard the run or report.
+Notifications use normal realtime chat instructions such as `Tell GROUPNAME ...`; Autonomous Mode is not needed. When run notifications are enabled, Ghost Eval reads `agentic_enabled` from `/settings`. If it is false, the worker enables only that flag for the run and restores the saved value after the finish notification. Each settings call runs in its own cron tick. The API token needs `/settings` update access. Read or enable errors appear in the dashboard and `storage/ghost_eval.log`; an uncertain enable result triggers restoration before the evaluation resumes. A failed restoration stays queued for retry and is also shown in the dashboard and log. Notification chat uses RAG and history disabled. Notification failures do not discard the report.
 
 ## Security
 

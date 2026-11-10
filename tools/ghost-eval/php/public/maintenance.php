@@ -18,9 +18,24 @@ $csrf = ghostEvalCsrf($services);
 $message = '';
 $didReset = false;
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    $workerLock = null;
     try {
         ghostEvalCheckCsrf($services);
         $action = isset($_POST['action']) && is_string($_POST['action']) ? $_POST['action'] : '';
+        $workerLock = fopen($installer->storagePath() . '/cron.lock', 'c+');
+        if ($workerLock === false) {
+            $workerLock = null;
+            throw new RuntimeException('Could not open the worker lock.');
+        }
+        if (!flock($workerLock, LOCK_EX | LOCK_NB)) {
+            fclose($workerLock);
+            $workerLock = null;
+            throw new RuntimeException('The worker is running. Wait for its current step to finish before changing local state.');
+        }
+        $activeRun = $storage->nextRun();
+        if (is_array($activeRun) && !empty($activeRun['settings']['agentic_restore_required'])) {
+            throw new RuntimeException('A run still needs to restore the Ghost’s Agentic setting. Wait for its worker phase to finish before clearing local state.');
+        }
         if ($action === 'clear_runs') {
             $storage->resetRuns();
             foreach (glob($installer->reportsPath() . '/*') ?: [] as $path) if (is_file($path)) @unlink($path);
@@ -35,6 +50,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         }
     } catch (Throwable $exception) {
         $message = $exception->getMessage();
+    } finally {
+        if (is_resource($workerLock)) {
+            flock($workerLock, LOCK_UN);
+            fclose($workerLock);
+        }
     }
 }
 ?>

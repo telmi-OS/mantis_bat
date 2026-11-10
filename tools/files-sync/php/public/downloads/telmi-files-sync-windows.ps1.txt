@@ -256,6 +256,12 @@ function Api-Call {
             if ($null -ne $cts) { $cts.Dispose() }
             if ($null -ne $uploadStream) { $uploadStream.Dispose() }
         }
+        if ($status -eq 415 -and -not $transportFailed -and $Method -eq 'POST' -and
+            $UploadPath -and $Action -in @('upload','file_replace')) {
+            $rejection = [InvalidOperationException]::new("HTTP 415: $errorText")
+            $rejection.Data['TelmiUploadRejected415'] = $true
+            throw $rejection
+        }
         if ($status -eq 409) { Stop-Sync "CONFLICT HTTP 409 during $Action; server wins; $errorText" }
         $retryable = ($Method -eq 'GET' -and $RetryGet -and $attempt -lt $limit -and
             ($transportFailed -or $status -eq 408 -or $status -eq 429 -or ($status -ge 500 -and $status -lt 600)))
@@ -545,6 +551,13 @@ function Upload-Action([string]$Rel, [string]$PlannedSha, [bool]$NewFile) {
         $script:Remote[$Rel] = @{id=$newId;sha=$PlannedSha;folder=$folderId}
         State-Set $Rel $PlannedSha $PlannedSha
         Log "$label $Rel"; $script:Counts.uploads++
+    } catch {
+        if ($_.Exception.Data['TelmiUploadRejected415'] -eq $true) {
+            Log "SKIP $Rel ($($_.Exception.Message))"
+            $script:Counts.skipped++
+            return
+        }
+        throw
     } finally { if ([IO.File]::Exists($snap)) { [IO.File]::Delete($snap) } }
 }
 function Run-Sync {

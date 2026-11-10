@@ -99,6 +99,8 @@ The standalone Files Sync tool is a no-auth guided page with two view modes and 
 
 The standalone Files Sync AWS S3 tool is a matching no-auth guide with Guided and Read all views. It provides a ready-to-upload AWS Lambda ZIP, an IAM policy template, source and an operations guide for syncing a Telmi Files space with an S3 prefix. AWS performs the sync; the Mantis Bat page does not configure AWS or receive credentials. See [the Files Sync AWS guide](docs/files-sync-s3-tool.md).
 
+Ghost Shell is a guided installer for a shell API on a user-managed Ubuntu VM. The guide provides a downloadable installer and requires a manual server-side activation phrase before command execution is enabled. The API runs on the user's system; the Mantis Bat page does not receive credentials or execute commands. See [the Ghost Shell guide](docs/ghost-shell-tool.md).
+
 The RAG dashboard uses a private bearer URL (`index.php?key=...`), not a traditional password login. It is Hades-compatible: 7 MiB per file and per job, one job per cron call, a 20-second Ghost request timeout, and persisted three-attempt retry handling. GD and external process/PDF binaries are not required.
 
 Current operational pages include:
@@ -135,6 +137,8 @@ This repository matters because open connector work should be buildable by the c
 
 If you want to build serious AI products on top of `telmi OS`, this is the repo for that work.
 
+Community contributions are welcome. Use [GitHub Discussions](https://github.com/telmi-OS/mantis_bat/discussions) for questions and early ideas, [GitHub Issues](https://github.com/telmi-OS/mantis_bat/issues) for bugs and concrete feature proposals, and [pull requests](https://github.com/telmi-OS/mantis_bat/pulls) to propose changes. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Teleport AI maintainers review and decide which changes are merged and released.
+
 Build:
 
 - connectors
@@ -158,6 +162,7 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - [Nextcloud Talk Connect](docs/nextcloud-talk-connect.md)
 - [Files Sync Tool](docs/files-sync-tool.md)
 - [Files Sync AWS S3 Tool](docs/files-sync-s3-tool.md)
+- [Ghost Shell Tool](docs/ghost-shell-tool.md)
 - [Self-Hosting RAG Prep PHP](docs/self-hosting-rag-prep-php.md)
 - [Security](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
@@ -166,7 +171,7 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 
 - Teleport AI: https://teleport-ai.com
 - telmi OS Resources: https://teleport-ai.com/resources.html#docs
-- Ghost API v2: https://portal.swaggerhub.com/apis/teleportaisolutionsl/ghost-api-v2/2.0.0
+- Ghost API v2 interactive specification (Apidog): https://idsfu8yxg1.apidog.io/
 - Telegram Bot API: https://core.telegram.org/bots/api
 - Telegram BotFather: https://core.telegram.org/bots/features#botfather
 

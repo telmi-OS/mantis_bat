@@ -31,6 +31,7 @@ $statusUrl = '';
 $healthUrl = '';
 $maintenanceUrl = '';
 $appUrl = '';
+$installerUnlockUrl = '';
 $accessSecret = '';
 $unlockAllowed = false;
 $configWritten = false;
@@ -152,6 +153,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $statusUrl = $baseUrl . '/status.php?key=' . rawurlencode((string) $config['app']['status_secret']);
         $healthUrl = $baseUrl . '/health.php?key=' . rawurlencode((string) $config['app']['health_secret']);
         $maintenanceUrl = $baseUrl . '/maintenance.php?key=' . rawurlencode((string) $config['app']['status_secret']);
+        $installerUnlockUrl = $baseUrl . '/install.php?unlock=' . rawurlencode($defaults['installer_secret']);
         $message = "Install complete.\nGhost API validated.\nRAG prep tool is ready.";
     } catch (Throwable $exception) {
         if ($configWritten && !$locked) {
@@ -209,8 +211,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 <pre><?= htmlspecialchars($healthUrl, ENT_QUOTES, 'UTF-8') ?></pre>
                 <p><strong>Maintenance URL</strong></p>
                 <pre><?= htmlspecialchars($maintenanceUrl, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p><strong>Installer unlock URL</strong></p>
+                <pre><?= htmlspecialchars($installerUnlockUrl, ENT_QUOTES, 'UTF-8') ?></pre>
                 <p><strong>Installer unlock secret</strong></p>
                 <pre><?= htmlspecialchars($defaults['installer_secret'], ENT_QUOTES, 'UTF-8') ?></pre>
+                <p class="field-help">To unlock this installer later, open the complete Installer unlock URL over HTTPS. Keep the unlock query in the browser address when you submit the installer form; the secret is checked again on submission. Treat the URL as a credential: anyone who has it can replace the configuration.</p>
+                <p class="field-help"><strong>Configuration replacement warning:</strong> installing again replaces the full RAG Prep configuration, including the Ghost JWT, cron secret, and feature and limit settings. Save the new app, cron, status, health, and unlock credentials, then update your cron job. Existing local jobs, uploads, and database records are not deleted by the installer.</p>
             <?php endif; ?>
         </section>
     <?php endif; ?>

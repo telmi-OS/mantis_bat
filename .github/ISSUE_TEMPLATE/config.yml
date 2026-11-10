@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and early project ideas
+    url: https://github.com/telmi-OS/mantis_bat/discussions
+    about: Use Discussions for questions and ideas that are not yet actionable issues.
+  - name: Security vulnerability reporting
+    url: https://github.com/telmi-OS/mantis_bat/security/policy
+    about: Read the security policy and report vulnerabilities privately. Do not post exploit details in a public issue.

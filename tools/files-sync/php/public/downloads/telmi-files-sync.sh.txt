@@ -9,9 +9,9 @@
 set -euo pipefail
 umask 077
 export TELMI_GHOST_JWT="${TELMI_GHOST_JWT:-PASTE_YOUR_GHOST_JWT_HERE}"
-export TELMI_BASE_URL="${TELMI_BASE_URL:-https://YOUR-TELMI-HOST.example}"
-export TELMI_SPACE_ID="${TELMI_SPACE_ID:-PASTE_YOUR_SPACE_ID_HERE}"
-export SYNC_DIR="${SYNC_DIR:-$HOME/TelmiSync/MySpace}"
+export TELMI_BASE_URL="${TELMI_BASE_URL:-https://sim.telmi-ai.com}"
+export TELMI_SPACE_ID="${TELMI_SPACE_ID:-PASTE_YOUR_GROUP_ID_HERE}"
+export SYNC_DIR="${SYNC_DIR:-$HOME/TelmiSync/TeleportAIProduct}"
 export STATE_FILE="${STATE_FILE:-.telmi-sync-state.json}"
 export LOCK_DIR="${LOCK_DIR:-$HOME/.telmi-files-sync.lock}"
 export LOCK_STALE_MINUTES="${LOCK_STALE_MINUTES:-360}"
@@ -47,6 +47,11 @@ import uuid
 
 
 class SyncError(Exception):
+    pass
+
+
+class UnsupportedFileType(SyncError):
+    """A definite HTTP 415 rejection of an upload or replacement."""
     pass
 
 
@@ -302,6 +307,9 @@ class Client:
                 log(f"WARN HTTP {method} {url} failed status={status} curl_rc={result.returncode}; retrying ({attempt}/{attempts}): {api_error or message}")
                 time.sleep(self.retry_sleep)
                 continue
+            if (status == 415 and result.returncode == 0 and method == "POST"
+                    and source is not None):
+                raise UnsupportedFileType(api_error or "This file type is not allowed")
             if status == 409:
                 abort(f"CONFLICT HTTP 409 on {method} {url}: server version changed or precondition failed ({api_error or 'conflict'}); server wins, refusing overwrite")
             abort(f"HTTP {method} {url} failed status={status} curl_rc={result.returncode}: {api_error or message}")
@@ -952,7 +960,12 @@ class Synchronizer:
         shutil.copyfile(p, snapshot)
         if sha256_file(snapshot) != planned['sha256']:
             abort(f'local file changed during upload snapshot: {rel}')
-        self.client.upload(snapshot, rel.rpartition('/')[2], parent_id)
+        try:
+            self.client.upload(snapshot, rel.rpartition('/')[2], parent_id)
+        except UnsupportedFileType as exc:
+            log(f'SKIP {rel} (HTTP 415: {exc})')
+            self.counts['skipped'] += 1
+            return
         _, files = self.client.list_folder(parent_id, self.page_size)
         matches = [f for f in files if f.get('name') == rel.rpartition('/')[2]]
         if len(matches) != 1 or matches[0].get('sha256', '').lower() != planned['sha256']:
@@ -979,7 +992,12 @@ class Synchronizer:
         shutil.copyfile(p, snapshot)
         if sha256_file(snapshot) != planned['sha256']:
             abort(f'local file changed during replacement snapshot: {rel}')
-        self.client.replace(snapshot, rel.rpartition('/')[2], fid, sha)
+        try:
+            self.client.replace(snapshot, rel.rpartition('/')[2], fid, sha)
+        except UnsupportedFileType as exc:
+            log(f'SKIP {rel} (HTTP 415: {exc})')
+            self.counts['skipped'] += 1
+            return
         self.recheck_file(fid, rel, planned['sha256'])
         self.state['files'][fid] = {'path': rel, 'sha256': planned['sha256'],
                                     'dev': planned['dev'], 'ino': planned['ino']}
