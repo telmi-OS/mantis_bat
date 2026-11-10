@@ -152,13 +152,43 @@ $build = $config->buildFingerprint();
     <section class="slide" data-screen="connect" data-label="Connect your Ghost" aria-labelledby="connect-title">
         <div class="slide-inner">
             <p class="eyebrow">Step 4 · Ghost HTTP tools</p>
-            <h2 id="connect-title">Add two HTTP<br>tools to your Ghost.</h2>
-            <p class="lead">Use the API URL printed by the installer. Both tools need the bearer token and must be called from an allowlisted source IP.</p>
-            <div class="safety-grid">
-                <article><span class="mini-icon">↗</span><h3>Submit a command</h3><p><strong>POST</strong> <code>https://YOUR_HOST/exec</code><br>Header: <code>Authorization: Bearer YOUR_TOKEN</code></p><pre><code>{"command":"uname -a","timeout":60,"wait":false}</code></pre><p>The response contains a <code>job_id</code>.</p></article>
-                <article><span class="mini-icon">⌕</span><h3>Get its result</h3><p><strong>GET</strong> <code>https://YOUR_HOST/jobs</code><br>Headers: bearer token and <code>X-Job-Id: JOB_ID</code></p><p>Poll the same job until its status is <code>done</code>, <code>timeout</code> or <code>error</code>.</p></article>
+            <h2 id="connect-title">Configure both<br>Ghost HTTP tools.</h2>
+            <p class="lead">Create the two tools below in the Ghost that should use this Linux system. Replace <code>YOUR_HOST</code> with the hostname printed by the installer. The Ghost runtime's outbound IP must be on the installer's allowlist.</p>
+
+            <article class="preset-card">
+                <div class="preset-title"><span class="number-badge">01</span><div><h3><code>shell_exec</code></h3><p>Submit one shell command.</p></div></div>
+                <div class="preset-field"><div class="command-head"><span class="config-label">Method</span><button type="button" class="copy-button" data-copy="exec-method">Copy</button></div><pre id="exec-method"><code>POST</code></pre></div>
+                <div class="preset-field"><div class="command-head"><span class="config-label">URL</span><button type="button" class="copy-button" data-copy="exec-url">Copy</button></div><pre id="exec-url"><code>https://YOUR_HOST/exec</code></pre></div>
+                <div class="preset-field"><div class="command-head"><span class="config-label">Headers JSON</span><button type="button" class="copy-button" data-copy="exec-headers">Copy</button></div><pre id="exec-headers"><code>{
+  "Authorization": "Bearer {{token}}"
+}</code></pre></div>
+                <div class="preset-field"><div class="command-head"><span class="config-label">JSON body template</span><button type="button" class="copy-button" data-copy="exec-body">Copy</button></div><pre id="exec-body"><code>{
+  "command": "{{command}}",
+  "timeout": 3600,
+  "wait": {{wait}}
+}</code></pre></div>
+                <div class="preset-field"><div class="command-head"><span class="config-label">Description</span><button type="button" class="copy-button" data-copy="exec-description">Copy</button></div><pre id="exec-description"><code>You have access to a dedicated Ubuntu 24.04 Linux host with outbound internet and passwordless sudo through this tool. Use it when computation, automation, software, infrastructure, or access to external systems can help complete the user's request. Commands run in /bin/sh: provide a POSIX shell command directly, without a shell wrapper. Do not use Bash-only syntax. Use non-interactive commands; do not depend on a person answering prompts. Use sudo -n when elevated privileges are needed. Keep stderr visible and inspect the exit code. Work headlessly and within the user's authorization. Set wait to false for longer work: the tool returns a job_id while the command runs. Save that exact ID and call shell_result to retrieve the result. If the job is still running, wait and poll the same ID; never submit a duplicate only because it is still running. Set wait to true only for short work that should finish within the HTTP request timeout; that response contains the final result and needs no polling. A successful HTTP response acknowledges submission but does not prove the command succeeded. Check the terminal status, exit code, stdout, stderr, and resulting system state before reporting completion. The command timeout is 3600 seconds and is separate from the HTTP request timeout. Keep failures visible even if a later command succeeds. The host is IP-restricted; HTTP 403 means the caller's outbound IP is not allowlisted.</code></pre></div>
+            </article>
+
+            <article class="preset-card">
+                <div class="preset-title"><span class="number-badge">02</span><div><h3><code>shell_result</code></h3><p>Poll one command and read its output.</p></div></div>
+                <div class="preset-field"><div class="command-head"><span class="config-label">Method</span><button type="button" class="copy-button" data-copy="result-method">Copy</button></div><pre id="result-method"><code>GET</code></pre></div>
+                <div class="preset-field"><div class="command-head"><span class="config-label">URL</span><button type="button" class="copy-button" data-copy="result-url">Copy</button></div><pre id="result-url"><code>https://YOUR_HOST/jobs</code></pre></div>
+                <div class="preset-field"><div class="command-head"><span class="config-label">Headers JSON</span><button type="button" class="copy-button" data-copy="result-headers">Copy</button></div><pre id="result-headers"><code>{
+  "Authorization": "Bearer {{token}}",
+  "X-Job-Id": "{{job_id}}"
+}</code></pre></div>
+                <div class="preset-field"><div class="command-head"><span class="config-label">Description</span><button type="button" class="copy-button" data-copy="result-description">Copy</button></div><pre id="result-description"><code>Retrieve the status and output for one background command started through shell_exec. Call this tool after each shell_exec submission that returns a job_id, and use the exact job_id from that response. The API expects it in the X-Job-Id header; keep the URL fixed at /jobs. The response includes status, exit, stdout, stderr, and execution metadata. Status is running, done, timeout, or error. If it is running, wait an appropriate short interval and poll the same job again. Do not start a duplicate command to obtain its result. When it reaches a terminal status, assess the exit code, stdout, stderr, and resulting system state; a terminal status alone does not prove the requested outcome succeeded. Output contains at most the last 20 KB of stdout and stderr. If the job_id is unknown, check that it exactly matches the originating response; a service restart clears the in-memory job index, so do not blindly rerun a possibly completed command. HTTP 403 indicates an IP-allowlist problem.</code></pre></div>
+            </article>
+
+            <div class="check-grid">
+                <div><span class="checkmark">✓</span><span>Save the installer-generated token as the Ghost tool variable <code>token</code>, without adding the word <code>Bearer</code> to its value.</span></div>
+                <div><span class="checkmark">✓</span><span>Map <code>command</code> to the command text and <code>wait</code> to a boolean. For asynchronous work, use <code>false</code>.</span></div>
+                <div><span class="checkmark">✓</span><span>Pass the exact <code>job_id</code> returned by <code>shell_exec</code> into <code>shell_result</code>.</span></div>
+                <div><span class="checkmark">✓</span><span>Enable both tools for this Ghost in its tool permissions or Action Mode settings.</span></div>
             </div>
-            <aside class="notice-card"><span class="notice-icon">!</span><p>Keep the token private. Anyone who has the token and can call from an allowlisted IP can submit shell commands with passwordless sudo on this VM.</p></aside>
+            <aside class="notice-card"><span class="notice-icon">!</span><p><code>423</code> means the activation phrase is missing or does not exactly match. <code>401</code> means the bearer token is missing or incorrect. An IP rejection is <code>403</code>; add the Ghost runtime's outbound IP to the allowlist. For <code>404 unknown job_id</code>, verify the ID and remember a service restart clears the in-memory job list.</p></aside>
+            <aside class="notice-card"><span class="notice-icon">!</span><p>Keep the token private. Anyone with the token and access from an allowlisted IP can submit shell commands with passwordless sudo on this VM.</p></aside>
             <div class="slide-actions"><button class="button button-primary" type="button" data-next>Next: operate carefully <span aria-hidden="true">→</span></button></div>
         </div>
     </section>
