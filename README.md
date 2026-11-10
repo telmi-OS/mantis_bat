@@ -99,6 +99,8 @@ The standalone Files Sync tool is a no-auth guided page with two view modes and 
 
 The standalone Files Sync AWS S3 tool is a matching no-auth guide with Guided and Read all views. It provides a ready-to-upload AWS Lambda ZIP, an IAM policy template, source and an operations guide for syncing a Telmi Files space with an S3 prefix. AWS performs the sync; the Mantis Bat page does not configure AWS or receive credentials. See [the Files Sync AWS guide](docs/files-sync-s3-tool.md).
 
+Ghost Shell is a guided installer for a shell API on a user-managed Ubuntu VM. The guide provides a downloadable installer and requires a manual server-side activation phrase before command execution is enabled. The API runs on the user's system; the Mantis Bat page does not receive credentials or execute commands. See [the Ghost Shell guide](docs/ghost-shell-tool.md).
+
 The RAG dashboard uses a private bearer URL (`index.php?key=...`), not a traditional password login. It is Hades-compatible: 7 MiB per file and per job, one job per cron call, a 20-second Ghost request timeout, and persisted three-attempt retry handling. GD and external process/PDF binaries are not required.
 
 Current operational pages include:
@@ -160,6 +162,7 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - [Nextcloud Talk Connect](docs/nextcloud-talk-connect.md)
 - [Files Sync Tool](docs/files-sync-tool.md)
 - [Files Sync AWS S3 Tool](docs/files-sync-s3-tool.md)
+- [Ghost Shell Tool](docs/ghost-shell-tool.md)
 - [Self-Hosting RAG Prep PHP](docs/self-hosting-rag-prep-php.md)
 - [Security](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)

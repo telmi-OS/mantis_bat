@@ -26,6 +26,15 @@
       "runtime": "php",
       "install_type": "php-public",
       "plan_tag": "pro"
+    },
+    "tools:ghost-shell:php": {
+      "title": "Ghost Shell",
+      "short_description": "A guided setup for installing a locked-by-default shell API on a user-managed Linux system.",
+      "entrypoint": "index.php",
+      "icon_repo_path": "tools/ghost-shell/php/public/assets/mantis-mini.svg",
+      "runtime": "php",
+      "install_type": "php-public",
+      "plan_tag": "pro"
     }
   }
 }

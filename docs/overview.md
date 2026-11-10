@@ -37,6 +37,7 @@ The current shipped modules are:
 - one Nextcloud Talk meeting-link utility tool for PHP in `tools/nextcloud-talk-connect/php/`
 - one no-auth Files Sync guide with local macOS and Windows clients in `tools/files-sync/php/`
 - one no-auth AWS S3 Files Sync guide with a ready Lambda deployment package in `tools/files-sync-s3/php/`
+- one Ghost Shell guide with a locked-by-default Ubuntu installer in `tools/ghost-shell/php/`
 
 The repository is shaped as a connector framework, and this is what is public today:
 
@@ -46,6 +47,7 @@ The repository is shaped as a connector framework, and this is what is public to
 - one Nextcloud Talk Connect PHP tool in `tools/nextcloud-talk-connect/php/`
 - one Files Sync guide module in `tools/files-sync/php/`
 - one AWS S3 Files Sync guide module in `tools/files-sync-s3/php/`
+- one Ghost Shell guide module in `tools/ghost-shell/php/`
 - one private paired Telegram owner
 - Ghost chat submission through `POST /chat` in queued mode
 - Ghost chat history enabled in the request payload
@@ -99,6 +101,8 @@ The Files space is configured separately from chat memory. Challenge chats stay 
 The Files Sync tool has a different deployment boundary: Hades serves its PHP guide page, while the chosen computer runs the downloaded v6 client with its own Ghost JWT, Files-space ID, local directory, and schedule. The guide page has no sign-in or installer and never receives the JWT. The clients preserve IDs for recognized moves and propagate file deletions for previously synchronized content: when the server copy is unchanged, a local deletion archives verified bytes before deleting remotely; if it changed, server wins and is restored. Server deletions remove tracked local copies without an archive. Empty folder deletion is not propagated. See [Files Sync Tool](files-sync-tool.md) for the safeguards and mode behavior.
 
 The AWS S3 Files Sync tool uses the same Mantis Bat guide style and images, but the downloaded Python client runs in AWS Lambda. It pairs a dedicated S3 prefix with one Telmi Files space, reads the Ghost JWT from AWS Secrets Manager, and stores sync state and archives in S3. The guide page does not deploy or invoke Lambda and receives no credentials. See [Files Sync AWS S3 Tool](files-sync-s3-tool.md).
+
+Ghost Shell follows the guided tool pattern and installs a shell API on a user-managed Ubuntu VM. The guide itself only serves instructions and a downloadable installer. The API is locked until the user connects to the server and writes the exact activation phrase; after activation, the Ghost can run shell commands with passwordless sudo. See [Ghost Shell Tool](ghost-shell-tool.md).
 
 ## Why Teleport AI Publishes This
 
