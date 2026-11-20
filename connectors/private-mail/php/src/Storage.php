@@ -151,7 +151,9 @@ SQL);
             ? 'INSERT INTO rules(address,subject,action) VALUES(:address,NULL,:action) ON CONFLICT(address) WHERE subject IS NULL DO UPDATE SET action=excluded.action'
             : 'INSERT INTO rules(address,subject,action) VALUES(:address,:subject,:action) ON CONFLICT(address,subject) WHERE subject IS NOT NULL DO UPDATE SET action=excluded.action';
         $query = $this->db->prepare($sql);
-        $query->execute([':address' => $address, ':subject' => $subject, ':action' => $action]);
+        $params = [':address' => $address, ':action' => $action];
+        if ($subject !== null) $params[':subject'] = $subject;
+        $query->execute($params);
     }
 
     public function deleteRule(int $id): void
