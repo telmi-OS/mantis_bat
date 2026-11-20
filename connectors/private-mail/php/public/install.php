@@ -133,6 +133,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 if(!is_array($group))throw new RuntimeException('Choose the owner or an available Ghost group as the notification destination.');
                 $destination=['type'=>'group','id'=>$groupId,'label'=>(string)$group['label']];
             }else throw new RuntimeException('Choose the owner or an available Ghost group as the notification destination.');
+            if(trim((string)$destination['label'])==='' || ((string)$destination['id']!=='' && (string)$destination['label']===(string)$destination['id']) || preg_match('/[\x00-\x1F\x7F]/u',(string)$destination['label'])) throw new RuntimeException('The selected destination has no usable name. Choose the owner or a group with a name.');
 
             $configData=[
                 'app'=>[

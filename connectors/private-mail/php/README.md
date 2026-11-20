@@ -75,7 +75,7 @@ Forward operations include the source email fields and body, plus any added text
 ## Ghost Processing
 
 - Summaries use realtime Ghost chat and focus on the newest message in a thread. A thread remains one email body; quoted text is not parsed into separate addresses or messages.
-- Notifications use a natural-language `Tell USERNAME …` or `Tell GROUP …` instruction through realtime chat.
+- Notifications use `Tell {configured name} New mail from …` through realtime chat. The configured owner, Ghost, or group name is used directly.
 - Drafts, replies, auto actions, and other complex mail work use queued Ghost chat and the same Ghost’s `private_mail_*` presets.
 - There is no Ghost inbox poller. The queued task directs the Ghost to return completed mail directly through the authenticated API.
 - The task includes separate From, To, Cc, Bcc, subject, body, timestamp, message ID, stored summary, applicable handling rule, configured destination, and recent diary context.
