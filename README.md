@@ -54,6 +54,7 @@ The current public implementations are:
 
 ```text
 connectors/telegram/php/
+connectors/private-mail/php/
 tools/rag-prep/php/
 tools/ghost-eval/php/
 tools/nextcloud-talk-connect/php/
@@ -72,6 +73,8 @@ The Telegram connector is built for:
 - cron or URL cron
 
 It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2.
+
+Private Mail is a standalone connector for one user-owned IMAP/SMTP mailbox. It provides a protected mail client, server-synchronized INBOX/Sent/Ghost Deleted folders, address handling rules, realtime summaries and notifications, queued Ghost tasks for complex work, and Ghost API v2 presets. Mailbox data, credentials, the rolling diary, temporary attachment downloads, and Ghost settings backups stay in private Hades storage. See [the Private Mail connector README](connectors/private-mail/php/README.md) for installation, synchronization, API, and security details.
 
 The RAG prep tool is built for:
 

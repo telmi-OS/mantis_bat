@@ -1,0 +1,4 @@
+Options -Indexes
+<FilesMatch "^(README\.md|CHANGELOG\.md|\.env.*)$">
+    Require all denied
+</FilesMatch>
