@@ -42,7 +42,9 @@ Mantis Bat discovers this module at `connectors/private-mail/php/README.md` and 
 3. Enter the public app URL, timezone, owner name and email, optional text signature, IMAP and SMTP credentials, Ghost API v2 base and JWT, and independent RAG and history choices.
 4. Choose the server folders for INBOX and Sent, a Ghost Files space, and one notification destination: the Ghost owner or an available group. Private Mail creates the separate Ghost Deleted folder when needed.
 5. Wait for the initial baseline sync and Ghost preset installation to finish. Save the protected App, Cron, Status, Health, and Installer unlock URLs.
-6. Configure Hades cron to call the private Cron URL once per minute.
+6. Configure Hades cron to call the private Cron URL once per minute (`* * * * *`). If a sync is still running, the next call is skipped to prevent overlapping workers.
+
+After installation, Hades **Open** opens the mailbox in the setup browser session. In a new session, enter the access token from the saved App URL (the value after `key=`), or open the complete App URL directly. The installer unlock URL remains separate for configuration changes.
 
 The installer creates the initial baseline before enabling Ghost processing. Existing messages in the baseline do not trigger summaries, notifications, drafts, or replies. After that baseline, messages found in INBOX use the matching rule or the default summarize-and-notify rule.
 

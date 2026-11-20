@@ -143,7 +143,11 @@ final class GhostClient
         $tools['enabled'] = true;
         $tools['enabled_tools'] = array_values(array_unique(array_merge(is_array($tools['enabled_tools'] ?? null) ? $tools['enabled_tools'] : [], ['http.curl_json'])));
         $tools['curl_presets'] = $presets;
-        $this->request('POST', '/settings', ['agent_tools' => $tools]);
+        try {
+            $this->request('POST', '/settings', ['agent_tools' => $tools]);
+        } catch (\Throwable $exception) {
+            throw new RuntimeException('Installing the private mail presets via Ghost API POST /settings failed. The mailbox baseline is saved; retry setup after the Ghost API issue is resolved. ' . $exception->getMessage(), 0, $exception);
+        }
         return basename($backupPath);
     }
 

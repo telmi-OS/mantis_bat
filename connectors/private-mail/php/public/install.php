@@ -27,8 +27,20 @@ if (!$installerLocked && $config->installed()) {
     exit('Not found.');
 }
 if ($installerLocked && !$unlocked && !$completionPending) {
-    http_response_code(404);
-    exit('Not found.');
+    if (($_SESSION['private_mail_access'] ?? false) === true) {
+        header('Location: index.php', true, 302);
+        exit;
+    }
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['app_key']) && is_string($_POST['app_key'])
+        && $security->equals((string)$config->get('app.access_secret', ''), trim($_POST['app_key']))) {
+        session_regenerate_id(true);
+        $_SESSION['private_mail_access'] = true;
+        header('Location: index.php', true, 303);
+        exit;
+    }
+    header('Cache-Control: no-store');
+    ?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open Private Mail</title><link rel="stylesheet" href="assets/theme.css"></head><body><main class="page-shell"><section class="card"><h1>Open Private Mail</h1><p class="copy">Enter the access token from the App URL saved during setup. It is the value after <code>key=</code>.</p><form method="post"><label>App access token<input type="password" name="app_key" autocomplete="off" required></label><button type="submit">Open Private Mail</button></form><p class="field-help">You can also open the complete saved App URL directly.</p></section></main></body></html><?php
+    exit;
 }
 
 $_SESSION['private_mail_csrf'] ??= $security->token(24);
@@ -169,6 +181,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 'Initial mailbox baseline'=>$baselineCount.' messages; no summaries, notifications, replies, or drafts were triggered.',
             ];
             $_SESSION['private_mail_install_output']=$output;
+            $_SESSION['private_mail_access']=true;
             unset($_SESSION['private_mail_install_draft'],$_SESSION['private_mail_installer_secret'],$_SESSION['private_mail_installer_unlocked']);
             header('Location: install.php',true,303);exit;
         } else throw new RuntimeException('Unknown installer action.');
@@ -212,4 +225,15 @@ function privateMailInstallH(string $value):string{return htmlspecialchars($valu
 <h3>Ghost API v2</h3><label>Ghost API base<input name="ghost_api_base" value="<?=privateMailInstallH((string)($posted['ghost_api_base']??'https://dev.telmi-ai.com/api/ghost/v2'))?>" required></label><label>Ghost JWT<input type="password" name="ghost_api_token" autocomplete="new-password" required><span class="field-help">Stored only in private server configuration.</span></label><label class="check-row"><input type="checkbox" name="use_rag" value="1" <?=!isset($posted['action'])||isset($posted['use_rag'])?'checked':''?>> Use Ghost RAG for private-mail processing</label><label class="check-row"><input type="checkbox" name="use_history" value="1" <?=!isset($posted['action'])||isset($posted['use_history'])?'checked':''?>> Use Ghost chat history independently</label>
 <label>Installer unlock secret<input type="password" value="<?=privateMailInstallH($installerSecret)?>" readonly><span class="field-help">The protected installer unlock URL is shown after setup.</span></label><button type="submit">Check connections and find mailbox folders</button></form></section>
 <?php endif?>
-</main></body></html>
+</main><div class="setup-loading" id="setup-loading" hidden role="status" aria-live="polite"><div class="setup-loading-card"><span class="setup-spinner" aria-hidden="true"></span><strong id="setup-loading-text">Working…</strong><p>Please keep this page open. Mailbox synchronization can take several minutes.</p></div></div><script>
+document.querySelectorAll('form[method="post"]').forEach(function(form) {
+    form.addEventListener('submit', function() {
+        if (!form.checkValidity()) return;
+        var action = form.querySelector('input[name="action"]');
+        document.getElementById('setup-loading-text').textContent = action && action.value === 'install' ? 'Installing Private Mail and syncing your mailbox…' : 'Checking connections and discovering folders…';
+        document.getElementById('setup-loading').hidden = false;
+        form.querySelectorAll('button[type="submit"]').forEach(function(button) { button.disabled = true; });
+    });
+});
+window.addEventListener('pageshow', function(event) { if (event.persisted) { document.getElementById('setup-loading').hidden = true; document.querySelectorAll('button[type="submit"]').forEach(function(button) { button.disabled = false; }); } });
+</script></body></html>
