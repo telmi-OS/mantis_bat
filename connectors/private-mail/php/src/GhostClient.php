@@ -9,7 +9,7 @@ use RuntimeException;
 
 final class GhostClient
 {
-    public function __construct(private string $base, private string $jwt, private string $appUrl) {}
+    public function __construct(private string $base, private string $jwt, private string $appUrl, private ?Storage $storage = null) {}
 
     public function settings(): array { return $this->request('GET', '/settings'); }
     public function probe(): array { return $this->settings(); }
@@ -201,6 +201,7 @@ final class GhostClient
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
         $error = curl_error($curl);
         curl_close($curl);
+        $this->logResponse($method, $path, $data, $status, $body === false ? ['connection_error'=>$error] : (json_decode((string)$body, true) ?? ['raw'=>mb_substr((string)$body,0,12000)]));
         if ($body === false) throw new RuntimeException('Ghost API connection failed: ' . $error);
         $decoded = json_decode((string) $body, true);
         if (!is_array($decoded) || $status < 200 || $status >= 300 || (($decoded['ok'] ?? true) === false)) {
@@ -208,5 +209,20 @@ final class GhostClient
             throw new RuntimeException('Ghost API request failed (' . $status . ')' . ($detail !== '' ? ': ' . mb_substr($detail, 0, 250) : '.'));
         }
         return $decoded;
+    }
+
+    private function logResponse(string $method, string $path, ?array $data, int $status, mixed $response): void
+    {
+        if ($this->storage === null) return;
+        try {
+            // Settings can contain preset API keys; never store its contents here.
+            if (str_starts_with($path, '/settings')) $response = ['redacted'=>'Settings response omitted because it may contain credentials.'];
+            $encoded=json_encode($response, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE|JSON_PARTIAL_OUTPUT_ON_ERROR);
+            if (!is_string($encoded)) $encoded='{}';
+            if (strlen($encoded)>64000) $encoded=json_encode(['truncated'=>true,'preview'=>mb_strcut($encoded,0,60000,'UTF-8')],JSON_INVALID_UTF8_SUBSTITUTE);
+            $query=$this->storage->db->prepare('INSERT INTO ghost_api_log(created_at,method,path,mode,http_status,response) VALUES(:at,:method,:path,:mode,:status,:response)');
+            $query->execute([':at'=>gmdate(DATE_ATOM),':method'=>$method,':path'=>$path,':mode'=>(string)($data['mode']??''),':status'=>$status,':response'=>$encoded]);
+            $this->storage->db->exec('DELETE FROM ghost_api_log WHERE id NOT IN (SELECT id FROM ghost_api_log ORDER BY id DESC LIMIT 10)');
+        } catch (\Throwable $exception) { error_log('[Private Mail] Could not record Ghost API response: '.$exception->getMessage()); }
     }
 }

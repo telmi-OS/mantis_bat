@@ -110,6 +110,7 @@ For each send, provide a unique `idempotency_key` so a retry cannot send the sam
 - Ghost email content is treated as untrusted data in summary and task prompts.
 - The app uses a private bearer URL to establish a session and CSRF tokens for state-changing browser actions.
 - `public/status.php?key=...` reports masked connection details, folder counts, pending work, uncertain submissions, and settings backup filenames.
+- The protected Status URL also shows the ten most recent Ghost API responses, including chat mode, HTTP status, response status, job ID, and any reply. Settings responses are omitted because they can contain preset credentials. Responses may contain private mail information; keep the Status URL private.
 - `public/health.php?key=...` reports runtime requirements and local folder health.
 
 ## Release Packaging

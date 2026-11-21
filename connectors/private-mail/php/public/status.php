@@ -12,4 +12,6 @@ $status['counts']=$counts;
 $status['pending_processing']=(int)$services['storage']->db->query("SELECT COUNT(*) FROM messages WHERE processing_status IN ('pending','retry')")->fetchColumn();
 $status['uncertain_processing']=(int)$services['storage']->db->query("SELECT COUNT(*) FROM messages WHERE processing_status IN ('delivery_uncertain','submission_uncertain')")->fetchColumn();
 $status['ghost_settings_backups']=array_map('basename',glob(dirname(__DIR__).'/storage/ghost-settings-*.json')?:[]);
+$status['recent_ghost_api_responses']=$services['storage']->db->query('SELECT created_at,method,path,mode,http_status,response FROM ghost_api_log ORDER BY id DESC LIMIT 10')->fetchAll(PDO::FETCH_ASSOC);
+foreach($status['recent_ghost_api_responses'] as &$entry){$decoded=json_decode((string)$entry['response'],true);if(is_array($decoded))$entry['response']=$decoded;}unset($entry);
 echo json_encode(['ok'=>true,'status'=>$status],JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);

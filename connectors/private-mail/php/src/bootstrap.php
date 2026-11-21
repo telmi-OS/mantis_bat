@@ -14,7 +14,8 @@ $storage->migrate();
 $ghost = new MantisBat\PrivateMail\GhostClient(
     (string) $config->get('ghost.api_base', ''),
     (string) $config->get('ghost.api_token', ''),
-    (string) $config->get('app.base_url', '')
+    (string) $config->get('app.base_url', ''),
+    $storage
 );
 $processor = new MantisBat\PrivateMail\MailProcessor($config, $storage, $ghost);
 $operations = new MantisBat\PrivateMail\MailOperations($config, $storage, $ghost);

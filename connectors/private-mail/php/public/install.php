@@ -82,7 +82,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             if ($imap['host']==='' || $imap['username']==='' || $imap['password']==='' || $imap['port']<1 || $imap['port']>65535) throw new RuntimeException('Complete the IMAP server, port, username, and password.');
             if ($smtp['host']==='' || $smtp['username']==='' || $smtp['password']==='' || $smtp['port']<1 || $smtp['port']>65535) throw new RuntimeException('Complete the SMTP server, port, username, and password.');
             if ($ghostToken==='') throw new RuntimeException('Enter the Ghost API v2 JWT.');
-            $ghost = new MantisBat\PrivateMail\GhostClient($ghostBase,$ghostToken,$appBase);
+            $ghost = new MantisBat\PrivateMail\GhostClient($ghostBase,$ghostToken,$appBase,$storage);
             $ghost->probe();
             $groups = $ghost->groups();
             $allFileSpaces = $ghost->fileSpaces();
@@ -164,7 +164,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 $baselineCount+=(int)($syncResult['new_messages']??0);
             }
             if(!($syncResult['complete']??false))throw new RuntimeException('Initial mailbox baseline is larger than one installer run can finish. Retry installation; existing sync progress is saved privately.');
-            $ghost = new MantisBat\PrivateMail\GhostClient((string)$draft['ghost']['api_base'],(string)$draft['ghost']['api_token'],(string)$draft['app']['base_url']);
+            $ghost = new MantisBat\PrivateMail\GhostClient((string)$draft['ghost']['api_base'],(string)$draft['ghost']['api_token'],(string)$draft['app']['base_url'],$storage);
             $backup = $ghost->installPresets((string)$configData['app']['api_key'],dirname(__DIR__).'/storage');
             $lockPath=dirname(__DIR__).'/storage/installed.lock';
             if(file_put_contents($lockPath,gmdate(DATE_ATOM),LOCK_EX)===false)throw new RuntimeException('Private Mail installed, but the installer lock could not be written.');

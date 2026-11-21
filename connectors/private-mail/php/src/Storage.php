@@ -105,6 +105,15 @@ CREATE TABLE IF NOT EXISTS operations (
  created_at TEXT NOT NULL,
  result_json TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS ghost_api_log (
+ id INTEGER PRIMARY KEY,
+ created_at TEXT NOT NULL,
+ method TEXT NOT NULL,
+ path TEXT NOT NULL,
+ mode TEXT NOT NULL DEFAULT '',
+ http_status INTEGER NOT NULL,
+ response TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sync_state (
  role TEXT PRIMARY KEY,
  uidvalidity TEXT NOT NULL,
