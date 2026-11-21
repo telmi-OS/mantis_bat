@@ -21,7 +21,7 @@ return [
     'signature' => '',
     'imap' => ['host'=>'','port'=>993,'username'=>'','password'=>''],
     'smtp' => ['host'=>'','port'=>465,'username'=>'','password'=>''],
-    'ghost' => ['api_base'=>'https://dev.telmi-ai.com/api/ghost/v2','api_token'=>''],
+    'ghost' => ['api_base'=>'https://dev.telmi-ai.com/api/ghost/v2','api_token'=>'','name'=>''],
     'files' => ['space_id'=>'','space_label'=>'','folder_id'=>''],
     'mail' => ['folders'=>['inbox'=>'INBOX','sent'=>'Sent','ghost_deleted'=>'Ghost Deleted']],
     'rules' => ['default'=>'summarize_notify'],
