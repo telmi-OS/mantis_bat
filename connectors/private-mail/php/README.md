@@ -66,9 +66,11 @@ The app can restore or permanently delete messages from Ghost Deleted. The Ghost
 
 Rules may be created before an address has received email. An incoming rule can target a sender address or that address plus an exact subject. The exact-subject rule takes precedence. Supported actions are `ignore`, `notify`, `summarize_notify`, `draft`, and `auto`.
 
-For outgoing mail, the Ghost checks rules for every resolved recipient, including addresses found through memory or another tool, and includes the subject so exact-subject rules can match. Any non-auto recipient rule requires direct-chat approval; if no recipient rule exists, the default is draft and ask. After chat approval, the Ghost submits `approval_confirmed=true` for that message. If the user explicitly authorizes sending without confirmation, it can instead submit `one_email_authorized=true`. Both are one-send flags and neither writes or changes a persistent rule.
+For a new email, the Ghost checks rules for every resolved To, Cc, and Bcc recipient, including addresses found through memory or another tool, and includes the final subject. Any non-auto recipient or missing rule requires direct-chat approval. If recipients or subject change, the Ghost checks again during planning.
 
-The `private_mail_draft` preset calls the deterministic send endpoint. Submitting a complete message sends it; the endpoint does not save a draft. Draft approval happens in chat before the preset call. Auto handling may send without routine approval when appropriate, and an ambiguous need for a reply must be brought to the configured destination.
+For incoming draft or auto handling, the connector resolves reply-all recipients and the reply subject and checks their rules before submitting one Ghost mission. Reply-all uses Reply-To or From plus the original To and Cc, excluding the owner and duplicates. The mission includes approval when the incoming rule is draft or any reply recipient is non-auto. It directs the Ghost to keep those recipients and not call the rule-check preset again for that reply.
+
+The `private_mail_draft` preset calls the deterministic send endpoint. Submitting a complete message sends it; the endpoint does not save a draft or check approval. The Ghost follows the mission or preset instructions to obtain any required approval before submission. The backend trusts the Ghost to do so.
 
 Forward operations include the source email fields and body, plus any added text. They do not attach the source message’s binary attachments.
 
@@ -79,13 +81,15 @@ Forward operations include the source email fields and body, plus any added text
 - Drafts, replies, auto actions, and other complex mail work use queued Ghost chat and the same Ghost’s `private_mail_*` presets.
 - There is no Ghost inbox poller. The queued task directs the Ghost to return completed mail directly through the authenticated API.
 - The task includes separate From, To, Cc, Bcc, subject, body, timestamp, message ID, stored summary, applicable handling rule, configured destination, and recent diary context.
-- Once a private-mail API action confirms it reached the deterministic backend, the Ghost task directs a destination notice limited to two sentences.
+- Submitting the completed reply to the send endpoint is the final mission action.
 
 RAG and history are configured independently in the installer. Each incoming email’s processing status, handling flag, summary, and processing errors are visible in the app and Status endpoint.
 
 ## Ghost API And Presets
 
 All Ghost API operations use `X-Mail-Key`. The installer adds these private presets and preserves unrelated Ghost settings and presets:
+
+After deploying an update, use **Update Ghost presets** in the protected app to back up current Ghost settings and refresh the preset instructions without reinstalling the connector.
 
 - `private_mail_rules_list`, `private_mail_rules`, and `private_mail_rule_delete`
 - `private_mail_recipient_rules`

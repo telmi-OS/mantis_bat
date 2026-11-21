@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 $moduleRoot = dirname(__DIR__);
-foreach (['Config','Security','Storage','GhostClient','ImapClient','MimeParser','ImapSync','Smtp','MailProcessor','MailOperations'] as $file) {
+foreach (['Config','Security','Storage','GhostClient','ImapClient','MimeParser','ImapSync','Smtp','ReplyPlan','MailProcessor','MailOperations'] as $file) {
     require_once $moduleRoot . '/src/' . $file . '.php';
 }
 

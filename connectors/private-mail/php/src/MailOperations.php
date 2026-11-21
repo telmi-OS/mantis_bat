@@ -135,12 +135,6 @@ final class MailOperations
         $input['subject'] = trim((string) ($input['subject'] ?? ''));
         $input['body'] = (string) ($input['body'] ?? '');
         if ($enforceRules) {
-            $decision = $this->recipientRules($input);
-            $oneEmailAuthorized = filter_var($input['one_email_authorized'] ?? false, FILTER_VALIDATE_BOOLEAN);
-            $approvalConfirmed = filter_var($input['approval_confirmed'] ?? false, FILTER_VALIDATE_BOOLEAN);
-            if ($decision['requires_approval'] && !$oneEmailAuthorized && !$approvalConfirmed) {
-                throw new RuntimeException('Approval is required for one or more recipients. Agree this message and its recipients with the configured destination in direct chat, then retry with approval_confirmed=true. Use one_email_authorized=true only when the user explicitly authorized this one email without confirmation.');
-            }
             $key = trim((string) ($input['idempotency_key'] ?? ''));
             if (!preg_match('/^[A-Za-z0-9._:-]{8,128}$/', $key)) throw new RuntimeException('Supply a unique idempotency_key of 8 to 128 letters, numbers, dots, underscores, colons, or hyphens for this send.');
             $cached = $this->claimOperation($key);
@@ -187,9 +181,7 @@ final class MailOperations
         $email = $localId !== null ? $this->storage->email($localId) : null;
         $email ??= $this->outgoingEmail($sent, $input);
         $summary = (new MailProcessor($this->config, $this->storage, $this->ghost))->summarizeOutgoing($email);
-        $actionContext = filter_var($input['one_email_authorized'] ?? false, FILTER_VALIDATE_BOOLEAN)
-            ? 'explicit one-email authorization'
-            : (filter_var($input['approval_confirmed'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 'direct-chat approval' : 'user or rule approved');
+        $actionContext = 'submitted for sending';
         $diary = 'Outgoing to ' . implode(', ', array_merge($sent['to'], $sent['cc'], $sent['bcc'])) . '; subject: ' . $sent['subject']
             . '; handling: ' . $actionContext . '; summary: ' . $summary
             . ((trim((string) ($input['user_instruction'] ?? '')) !== '') ? '; user instruction: ' . trim((string) $input['user_instruction']) : '');
@@ -205,16 +197,13 @@ final class MailOperations
     {
         $email = $this->storage->email((int) ($input['message_id'] ?? 0));
         if (!is_array($email)) throw new RuntimeException('Private mail message was not found.');
-        $replyTo = $this->storage->addressList((int) $email['id'], 'reply_to');
-        if ($replyTo === []) $replyTo = $this->storage->addressList((int) $email['id'], 'from');
-        if ($replyTo === []) throw new RuntimeException('The source message has no reply address.');
-        $subject = (string) $email['subject'];
-        if (!preg_match('/^\s*re\s*:/i', $subject)) $subject = 'Re: ' . $subject;
+        $plan = ReplyPlan::create($email, (string)$this->config->get('owner.email',''));
         $refs = trim((string) $email['references_header']);
         if ($email['message_id'] !== '') $refs = trim($refs . ' <' . $email['message_id'] . '>');
         $sendInput = $input;
-        $sendInput['to'] = array_column($replyTo, 'address');
-        $sendInput['subject'] = $subject;
+        $sendInput['to'] = $plan['to'];
+        $sendInput['cc'] = array_values(array_unique(array_merge($plan['cc'], $this->normalizeRecipientInput($input['cc'] ?? []))));
+        $sendInput['subject'] = $plan['subject'];
         $sendInput['source_message_id'] = (int) $email['id'];
         $sendInput['in_reply_to'] = $email['message_id'] !== '' ? '<' . $email['message_id'] . '>' : '';
         $sendInput['references'] = trim($refs);
