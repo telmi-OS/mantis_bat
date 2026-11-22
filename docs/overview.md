@@ -42,6 +42,7 @@ The current shipped modules are:
 The repository is shaped as a connector framework, and this is what is public today:
 
 - one Telegram PHP connector module in `connectors/telegram/php/`
+- one Private Mail connector in `connectors/private-mail/php/`, using a worker Ghost for summaries and a separate autonomous Ghost for correspondence; see the [Private Mail guide](private-mail-connector.md)
 - one RAG prep PHP tool in `tools/rag-prep/php/`
 - one standalone Ghost Eval PHP tool in `tools/ghost-eval/php/`
 - one Nextcloud Talk Connect PHP tool in `tools/nextcloud-talk-connect/php/`

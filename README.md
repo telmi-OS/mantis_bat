@@ -74,7 +74,7 @@ The Telegram connector is built for:
 
 It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2.
 
-Private Mail is a standalone connector for one user-owned IMAP/SMTP mailbox. It provides a protected mail client, server-synchronized INBOX/Sent/Ghost Deleted folders, address handling rules, realtime summaries and notifications, queued Ghost tasks for complex work, and Ghost API v2 presets. Mailbox data, credentials, the rolling diary, temporary attachment downloads, and Ghost settings backups stay in private Hades storage. See [the Private Mail connector README](connectors/private-mail/php/README.md) for installation, synchronization, API, and security details.
+Private Mail connects your own email account to two Ghosts. A worker Ghost summarizes new mail and notifies you; a separate autonomous Ghost handles conversations and replies, asking for approval when your rules require it. You can also use its protected mail app to read, write, and organize messages. Consider adding both Ghosts to relevant team or project groups so they can reach the right people and use available shared context. See the [Private Mail guide](docs/private-mail-connector.md) to get started.
 
 The RAG prep tool is built for:
 
@@ -159,7 +159,7 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - [Project Overview](docs/overview.md)
 - [Quickstart](docs/quickstart.md)
 - [Ghost API v2](docs/ghost-api-v2.md)
-- [Private Mail Connector](connectors/private-mail/php/README.md)
+- [Private Mail Connector](docs/private-mail-connector.md)
 - [Self-Hosting PHP](docs/self-hosting-php.md)
 - [RAG Prep Tool](docs/rag-prep-tool.md)
 - [Ghost Eval Tool](docs/ghost-eval-tool.md)

@@ -4,6 +4,18 @@
 
 Private Mail is a standalone Mantis Bat connector for telmi OS Hades. It connects one user-owned mailbox through IMAP and SMTP, mirrors its messages and handling state in private SQLite storage, provides a protected mail app, and installs Ghost API v2 presets for private mailbox work.
 
+## Meet Your Two Ghosts
+
+Private Mail needs two different Ghosts working together. You choose them during setup and provide a JWT for each one. A JWT is the private access key that lets the connector communicate with that Ghost; keep both keys private.
+
+The **worker Ghost** looks after the mailbox. When a new message arrives, it writes a short summary and can tell you or a group about it. When a message needs a reply, it passes the job to your other Ghost. Enable agentic mode for this Ghost and keep autonomous mode off. It does not receive the Private Mail tools.
+
+The **autonomous Ghost** is the Ghost you can work with on the correspondence itself. It can understand the conversation, prepare a reply, ask you or your chosen group for approval when needed, and send the email. For an `auto` rule it can send without routine approval. Enable both agentic and autonomous modes for this Ghost. Setup gives it the Private Mail tools so it can use the mailbox.
+
+For example, if a supplier sends a question, the worker can summarize it. If you have chosen draft handling, the worker asks the autonomous Ghost to prepare a reply; that Ghost then asks your selected person or group to approve it before sending. If the sender has an auto rule and all reply recipients qualify, the autonomous Ghost can reply without that approval step.
+
+Consider adding both Ghosts to the groups relevant to your correspondence, such as your team or project group. Shared group membership can help them reach the right people and, where the Ghost and request have access to that context, draw on relevant shared knowledge. Membership alone does not guarantee that a particular request retrieves group memories: access, context and the RAG setting matter. Give the autonomous Ghost write access to the Files space you want to use for requested attachments.
+
 ## Requirements
 
 - PHP 8.1+
@@ -82,7 +94,7 @@ Forward operations include the source email fields and body, plus any added text
 - Notifications use `Tell {configured name} New mail from …` through realtime chat. The configured owner, Ghost, or group name is used directly.
 - Drafts, replies, auto actions, and other complex mail work are handed to the separate autonomous Ghost by a natural-language `Tell` request through the worker's realtime chat. The autonomous Ghost uses the `private_mail_*` presets.
 - There is no Ghost inbox poller. The autonomous Ghost sends completed mail directly through the authenticated API.
-- The task includes separate From, To, Cc, Bcc, subject, body, timestamp, message ID, stored summary, applicable handling rule, configured destination, and recent diary context.
+- The handoff includes the email fields, stored summary, reply recipients, and whether approval is needed. Private Mail also keeps a rolling diary locally.
 - Submitting the completed reply to the send endpoint is the final mission action.
 
 RAG and history are configured independently in the installer. Each incoming email’s processing status, handling flag, summary, and processing errors are visible in the app and Status endpoint.
