@@ -116,7 +116,8 @@ final class MailProcessor
         if ($name === '' || ($name === (string)($destination['id'] ?? '') && $name !== '')) throw new \RuntimeException('Configure a destination name for private mail notifications.');
         $text = 'Tell ' . $name . ' New mail from ' . $this->senderLabel($email)
             . ' — “' . mb_substr((string) $email['subject'], 0, 180) . '”. Summary: ' . $summary;
-        $this->ghost->realtime($text, (bool) $this->config->get('processing.use_rag', true), (bool) $this->config->get('processing.use_history', true));
+        $reply=$this->ghost->realtime($text, (bool) $this->config->get('processing.use_rag', true), (bool) $this->config->get('processing.use_history', true));
+        if (stripos($reply,'message not sent')!==false) throw new \RuntimeException('The Ghost reported that the notification was not sent: '.$reply);
     }
 
     private function taskPrompt(array $email, string $summary, string $action): string

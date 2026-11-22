@@ -88,7 +88,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $ghost = new MantisBat\PrivateMail\GhostClient($ghostBase,$ghostToken,$appBase,$storage);
             $autonomous = new MantisBat\PrivateMail\GhostClient($ghostBase,$autonomousToken,$appBase,$storage);
             MantisBat\PrivateMail\GhostClient::validatePair($ghost->probe(),$autonomous->probe());
-            $groups = $autonomous->groups();
+            $workerGroups = $ghost->groups();
+            $autonomousGroups = $autonomous->groups();
+            $autonomousGroupIds = array_column($autonomousGroups,'id');
+            $groups = array_values(array_filter($workerGroups,static fn(array $group):bool=>in_array($group['id'],$autonomousGroupIds,true)));
             $allFileSpaces = $autonomous->fileSpaces();
             foreach ($groups as &$group) {
                 foreach ($allFileSpaces as $knownSpace) {

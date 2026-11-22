@@ -39,17 +39,14 @@ final class GhostClient
 
     public function groups(): array
     {
-        $result = $this->request('GET', '/inbox_groups?limit=100');
-        $groups = $result['data']['groups'] ?? $result['groups'] ?? [];
-        if (!is_array($groups)) throw new RuntimeException('Ghost API returned an invalid group list.');
         $normalized = [];
-        foreach ($groups as $group) {
-            if (!is_array($group)) continue;
-            $id = (string) ($group['group_id'] ?? '');
-            if ($id === '') continue;
-            $normalized[] = ['id' => $id, 'label' => (string) ($group['display_name'] ?? $group['name'] ?? $group['group_name'] ?? $id)];
+        foreach ($this->fileSpaces() as $space) {
+            $id = trim((string) ($space['group_id'] ?? ''));
+            $label = trim((string) ($space['label'] ?? ''));
+            if ($id === '' || $label === '') continue;
+            $normalized[$id] = ['id' => $id, 'label' => $label];
         }
-        return $normalized;
+        return array_values($normalized);
     }
 
     public function fileSpaces(): array
@@ -239,7 +236,7 @@ final class GhostClient
         if ($this->storage === null) return;
         try {
             // Settings can contain preset API keys; never store its contents here.
-            if (str_starts_with($path, '/settings')) $response = ['redacted'=>'Settings response omitted because it may contain credentials.'];
+            if (str_starts_with($path, '/settings') || str_starts_with($path, '/inbox')) $response = ['redacted'=>'Response omitted because it may contain credentials or private messages.'];
             $encoded=json_encode($response, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE|JSON_PARTIAL_OUTPUT_ON_ERROR);
             if (!is_string($encoded)) $encoded='{}';
             if (strlen($encoded)>64000) $encoded=json_encode(['truncated'=>true,'preview'=>mb_strcut($encoded,0,60000,'UTF-8')],JSON_INVALID_UTF8_SUBSTITUTE);

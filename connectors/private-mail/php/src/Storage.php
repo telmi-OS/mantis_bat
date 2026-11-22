@@ -135,6 +135,7 @@ SQL);
             $this->db->exec('UPDATE attachments SET size=encoded_size');
         }
         $this->ensureColumns('diary', ['entry_kind' => "TEXT NOT NULL DEFAULT 'context'"]);
+        $this->db->exec('UPDATE ghost_api_log SET response=\'{"redacted":"Inbox response removed from diagnostics."}\' WHERE path LIKE "/inbox%"');
         $this->db->exec('CREATE UNIQUE INDEX IF NOT EXISTS diary_message_kind ON diary(message_id,entry_kind) WHERE message_id IS NOT NULL');
         @chmod($this->path, 0600);
     }
