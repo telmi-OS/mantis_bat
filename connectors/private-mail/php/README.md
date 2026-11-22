@@ -14,7 +14,7 @@ Private Mail is a standalone Mantis Bat connector for telmi OS Hades. It connect
 - HTTPS for the app
 - Outbound TLS access to the mailbox IMAP and SMTP servers, Ghost API v2, and Ghost Files API
 - One mailbox account with IMAP and SMTP credentials
-- A Ghost API v2 JWT with settings access and write access to one Files space
+- Two different Ghosts and their API v2 JWTs: an agentic worker with autonomous mode disabled, and a fully autonomous Ghost with settings access and write access to one Files space
 
 The connector uses PHP streams for IMAP and does not require `ext-imap`, Composer, an external mail client, or an operating-system package. TLS peer and host verification stay enabled.
 
@@ -26,7 +26,7 @@ The connector uses PHP streams for IMAP and does not require `ext-imap`, Compose
 - applies exact sender-plus-subject rules before sender-only rules; defaults new senders to **summarize and notify**
 - summarizes every non-ignored incoming message through realtime Ghost chat and stores the summary
 - sends notifications through realtime Ghost chat to one configured owner or group
-- queues draft and auto handling tasks through Ghost chat without polling the Ghost inbox
+- asks the worker Ghost through realtime chat to hand draft and auto missions to the autonomous Ghost without polling the Ghost inbox
 - provides a protected app for reading, searching, composing, replying, forwarding, deleting, rule management, and user-only restore or permanent deletion from Ghost Deleted
 - provides an authenticated Ghost API for mail search, read, send, reply, forward, recoverable delete, attachment requests, recipient-rule checks, and rule management
 - downloads requested attachments only from IMAP, uploads them to the configured Ghost Files space, and removes the temporary local copy
@@ -39,14 +39,14 @@ Mantis Bat discovers this module at `connectors/private-mail/php/README.md` and 
 
 1. Sync the Mantis Bat module catalog and choose **Private Mail (PHP)**.
 2. Create the Hades PHP instance and open its installer.
-3. Enter the public app URL, timezone, owner name and email, optional text signature, IMAP and SMTP credentials, mailbox Ghost's chat name, Ghost API v2 base and JWT, and independent RAG and history choices.
+3. Enter the public app URL, timezone, owner name and email, optional text signature, IMAP and SMTP credentials, the worker Ghost JWT, the autonomous Ghost's chat name and JWT, and independent RAG and history choices. Both Ghosts must be different: enable agentic mode for the worker and both agentic and autonomous modes for the second Ghost.
 4. Choose the server folders for INBOX and Sent, a Ghost Files space, and one notification destination: the Ghost owner or an available group. Private Mail creates the separate Ghost Deleted folder when needed.
 5. Wait for the initial baseline sync and Ghost preset installation to finish. Save the protected App, Cron, Status, Health, and Installer unlock URLs.
 6. Configure Hades cron to call the private Cron URL once per minute (`* * * * *`). If a sync is still running, the next call is skipped to prevent overlapping workers.
 
 After installation, Hades **Open** opens the mailbox in the setup browser session. In a new session, enter the access token from the saved App URL (the value after `key=`), or open the complete App URL directly. The installer unlock URL remains separate for configuration changes.
 
-After upgrading an existing installation, save the mailbox Ghost's chat name in the protected app. Incoming reply missions address that Ghost by name. Messages that could not be submitted because the name was missing remain retryable; previously queued messages are not resubmitted automatically.
+After upgrading an existing installation, connect the separate autonomous Ghost in the protected app. Supply a new worker JWT there if the old Ghost is autonomous. The connector verifies both identities and modes, installs the presets on the autonomous Ghost, and removes existing `private_mail_` presets from the worker after backing up its settings. Previously queued messages are not resubmitted automatically.
 
 The installer creates the initial baseline before enabling Ghost processing. Existing messages in the baseline do not trigger summaries, notifications, drafts, or replies. After that baseline, messages found in INBOX use the matching rule or the default summarize-and-notify rule.
 
@@ -80,8 +80,8 @@ Forward operations include the source email fields and body, plus any added text
 
 - Summaries use realtime Ghost chat and focus on the newest message in a thread. A thread remains one email body; quoted text is not parsed into separate addresses or messages.
 - Notifications use `Tell {configured name} New mail from …` through realtime chat. The configured owner, Ghost, or group name is used directly.
-- Drafts, replies, auto actions, and other complex mail work use queued Ghost chat and the same Ghost’s `private_mail_*` presets.
-- There is no Ghost inbox poller. The queued task directs the Ghost to return completed mail directly through the authenticated API.
+- Drafts, replies, auto actions, and other complex mail work are handed to the separate autonomous Ghost by a natural-language `Tell` request through the worker's realtime chat. The autonomous Ghost uses the `private_mail_*` presets.
+- There is no Ghost inbox poller. The autonomous Ghost sends completed mail directly through the authenticated API.
 - The task includes separate From, To, Cc, Bcc, subject, body, timestamp, message ID, stored summary, applicable handling rule, configured destination, and recent diary context.
 - Submitting the completed reply to the send endpoint is the final mission action.
 
@@ -91,7 +91,7 @@ RAG and history are configured independently in the installer. Each incoming ema
 
 All Ghost API operations use `X-Mail-Key`. The installer adds these private presets and preserves unrelated Ghost settings and presets:
 
-After deploying an update, use **Update Ghost presets** in the protected app to back up current Ghost settings and refresh the preset instructions without reinstalling the connector.
+After deploying an update, use **Update Ghost presets** in the protected app to back up and refresh the autonomous Ghost's preset instructions without reinstalling the connector.
 
 - `private_mail_rules_list`, `private_mail_rules`, and `private_mail_rule_delete`
 - `private_mail_recipient_rules`

@@ -11,7 +11,7 @@ final class MailOperations
 {
     private const ATTACHMENT_LIMIT = 2097152;
 
-    public function __construct(private readonly Config $config, private readonly Storage $storage, private readonly GhostClient $ghost) {}
+    public function __construct(private readonly Config $config, private readonly Storage $storage, private readonly GhostClient $ghost, private readonly ?GhostClient $workerGhost = null) {}
 
     public function rules(): array { return $this->storage->rules(); }
 
@@ -180,7 +180,7 @@ final class MailOperations
         $localId = $this->recordOutgoing($sent, $input);
         $email = $localId !== null ? $this->storage->email($localId) : null;
         $email ??= $this->outgoingEmail($sent, $input);
-        $summary = (new MailProcessor($this->config, $this->storage, $this->ghost))->summarizeOutgoing($email);
+        $summary = (new MailProcessor($this->config, $this->storage, $this->workerGhost ?? $this->ghost))->summarizeOutgoing($email);
         $actionContext = 'submitted for sending';
         $diary = 'Outgoing to ' . implode(', ', array_merge($sent['to'], $sent['cc'], $sent['bcc'])) . '; subject: ' . $sent['subject']
             . '; handling: ' . $actionContext . '; summary: ' . $summary

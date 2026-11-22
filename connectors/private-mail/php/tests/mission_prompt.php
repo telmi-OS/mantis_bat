@@ -4,7 +4,7 @@ foreach(['Config','Storage','GhostClient','ReplyPlan','MailProcessor'] as $file)
 use MantisBat\PrivateMail\{Config,Storage,GhostClient,MailProcessor};
 $dir=sys_get_temp_dir().'/private-mail-prompt-'.bin2hex(random_bytes(8));mkdir($dir,0700);
 try {
-    $config=new Config($dir.'/config.php');$config->write(['ghost'=>['name'=>'Action Ghost'],'owner'=>['email'=>'owner@example.com'],'notifications'=>['destination'=>['label'=>'Team']]]);
+    $config=new Config($dir.'/config.php');$config->write(['autonomous_ghost'=>['name'=>'Action Ghost','api_token'=>'example'],'owner'=>['email'=>'owner@example.com'],'notifications'=>['destination'=>['label'=>'Team']]]);
     $storage=new Storage($dir.'/mail.sqlite');$storage->migrate();$storage->setRule('sender@example.com',null,'auto');
     $processor=new MailProcessor($config,$storage,new GhostClient('','',''));
     $email=['id'=>7,'subject'=>'Hello','body'=>'Hi','addresses'=>[['kind'=>'from','address'=>'sender@example.com'],['kind'=>'to','address'=>'owner@example.com']]];

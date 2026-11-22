@@ -18,6 +18,7 @@ $ghost = new MantisBat\PrivateMail\GhostClient(
     $storage
 );
 $processor = new MantisBat\PrivateMail\MailProcessor($config, $storage, $ghost);
-$operations = new MantisBat\PrivateMail\MailOperations($config, $storage, $ghost);
+$autonomousGhost = new MantisBat\PrivateMail\GhostClient((string)$config->get('ghost.api_base',''),(string)$config->get('autonomous_ghost.api_token',''),(string)$config->get('app.base_url',''),$storage);
+$operations = new MantisBat\PrivateMail\MailOperations($config, $storage, $autonomousGhost, $ghost);
 
-return compact('moduleRoot','config','security','storage','ghost','processor','operations');
+return compact('moduleRoot','config','security','storage','ghost','autonomousGhost','processor','operations');

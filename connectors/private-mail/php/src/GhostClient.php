@@ -14,6 +14,29 @@ final class GhostClient
     public function settings(): array { return $this->request('GET', '/settings'); }
     public function probe(): array { return $this->settings(); }
 
+    public static function validatePair(array $worker, array $autonomous): void
+    {
+        $a=$worker['data']??[]; $b=$autonomous['data']??[];
+        $workerId=trim((string)($a['ghost_uuid']??'')); $autonomousId=trim((string)($b['ghost_uuid']??''));
+        if($workerId==='' || $autonomousId==='') throw new RuntimeException('Both Ghost settings must report their Ghost identity.');
+        if($workerId===$autonomousId) throw new RuntimeException('Choose two different Ghosts: a worker and an autonomous Ghost.');
+        if(empty($a['agentic_enabled'])) throw new RuntimeException('Enable agentic mode for the worker Ghost.');
+        if(!empty($a['autonomy_enabled'])) throw new RuntimeException('Disable autonomous mode for the worker Ghost; use a different fully autonomous Ghost for missions.');
+        if(empty($b['agentic_enabled']) || empty($b['autonomy_enabled'])) throw new RuntimeException('Enable agentic and autonomous mode for the autonomous Ghost.');
+    }
+
+    public function removePrivateMailPresets(string $storageDirectory): void
+    {
+        $settings=$this->settings();$tools=$settings['data']['agent_tools']??[];
+        $presets=is_array($tools['curl_presets']??null)?$tools['curl_presets']:[];
+        $filtered=array_filter($presets,static fn($name):bool=>!str_starts_with((string)$name,'private_mail_'),ARRAY_FILTER_USE_KEY);
+        if(count($filtered)===count($presets))return;
+        $path=rtrim($storageDirectory,'/').'/ghost-settings-'.gmdate('Ymd-His').'-'.bin2hex(random_bytes(4)).'.json';
+        if(file_put_contents($path,json_encode($settings,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),LOCK_EX)===false)throw new RuntimeException('Could not save the worker Ghost settings backup.');
+        @chmod($path,0600);$tools['curl_presets']=$filtered;
+        $this->request('POST','/settings',['agent_tools'=>$tools]);
+    }
+
     public function groups(): array
     {
         $result = $this->request('GET', '/inbox_groups?limit=100');

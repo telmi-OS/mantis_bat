@@ -68,7 +68,7 @@ final class MailProcessor
                     }
                     $this->mark($id, 'queued_at', 'submitting');
                     try {
-                        $this->ghost->queued($prompt, (bool) $this->config->get('processing.use_rag', true), (bool) $this->config->get('processing.use_history', true));
+                        $this->ghost->realtime($prompt, (bool) $this->config->get('processing.use_rag', true), (bool) $this->config->get('processing.use_history', true));
                         $this->mark($id, 'queued_at', gmdate(DATE_ATOM));
                         $this->finish($id, 'queued', '', $action);
                         $this->storage->addDiary($id, $this->diaryEntry($email, $summary, $action), 'incoming');
@@ -124,8 +124,8 @@ final class MailProcessor
         $destination = (array) $this->config->get('notifications.destination', []);
         $target = (string) ($destination['label'] ?? $this->config->get('owner.name', 'Owner'));
         if (trim($target) === '' || ($target === (string)($destination['id'] ?? '') && $target !== '')) throw new \RuntimeException('Configure a destination name for private mail tasks.');
-        $ghostName=trim((string)$this->config->get('ghost.name',''));
-        if ($ghostName==='' || preg_match('/[\x00-\x1F\x7F]/u',$ghostName)) throw new \RuntimeException('Set the mailbox Ghost name in the Private Mail app before sending mail missions.');
+        $ghostName=trim((string)$this->config->get('autonomous_ghost.name',''));
+        if ($ghostName==='' || (string)$this->config->get('autonomous_ghost.api_token','')==='' || preg_match('/[\x00-\x1F\x7F]/u',$ghostName)) throw new \RuntimeException('Configure the separate autonomous Ghost in the Private Mail app before sending mail missions.');
         $plan = ReplyPlan::create($email, (string)$this->config->get('owner.email',''));
         $requiresApproval = $action !== 'auto';
         foreach (array_merge($plan['to'],$plan['cc']) as $recipient) {

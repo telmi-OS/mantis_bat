@@ -71,6 +71,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $ghostBase = rtrim(trim((string)($_POST['ghost_api_base']??'')), '/');
             $ghostToken = trim((string)($_POST['ghost_api_token']??''));
             $ghostName = trim((string)($_POST['ghost_name']??''));
+            $autonomousToken=trim((string)($_POST['autonomous_ghost_token']??''));
             foreach ([$appBase,$ghostBase] as $url) {
                 $parts=parse_url($url);
                 if (!filter_var($url,FILTER_VALIDATE_URL) || !is_array($parts) || strtolower((string)($parts['scheme']??''))!=='https'
@@ -82,12 +83,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             if ($ownerName === '' || mb_strlen($ownerName)>120 || preg_match('/[\x00-\x1F\x7F]/u',$ownerName) || !filter_var($ownerEmail,FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Enter the owner’s name and a valid email address.');
             if ($imap['host']==='' || $imap['username']==='' || $imap['password']==='' || $imap['port']<1 || $imap['port']>65535) throw new RuntimeException('Complete the IMAP server, port, username, and password.');
             if ($smtp['host']==='' || $smtp['username']==='' || $smtp['password']==='' || $smtp['port']<1 || $smtp['port']>65535) throw new RuntimeException('Complete the SMTP server, port, username, and password.');
-            if ($ghostToken==='') throw new RuntimeException('Enter the Ghost API v2 JWT.');
-            if ($ghostName==='' || mb_strlen($ghostName)>120 || preg_match('/[\x00-\x1F\x7F]/u',$ghostName)) throw new RuntimeException('Enter the mailbox Ghost name as it appears in chat.');
+            if ($ghostToken==='' || $autonomousToken==='') throw new RuntimeException('Enter JWTs for both the worker and autonomous Ghost.');
+            if ($ghostName==='' || mb_strlen($ghostName)>120 || preg_match('/[\x00-\x1F\x7F]/u',$ghostName)) throw new RuntimeException('Enter the autonomous Ghost name as it appears in chat.');
             $ghost = new MantisBat\PrivateMail\GhostClient($ghostBase,$ghostToken,$appBase,$storage);
-            $ghost->probe();
-            $groups = $ghost->groups();
-            $allFileSpaces = $ghost->fileSpaces();
+            $autonomous = new MantisBat\PrivateMail\GhostClient($ghostBase,$autonomousToken,$appBase,$storage);
+            MantisBat\PrivateMail\GhostClient::validatePair($ghost->probe(),$autonomous->probe());
+            $groups = $autonomous->groups();
+            $allFileSpaces = $autonomous->fileSpaces();
             foreach ($groups as &$group) {
                 foreach ($allFileSpaces as $knownSpace) {
                     if (is_array($knownSpace) && (string)($knownSpace['group_id']??'')===(string)$group['id'] && trim((string)($knownSpace['label']??''))!=='') {
@@ -108,7 +110,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 'owner'=>['name'=>$ownerName,'email'=>$ownerEmail],
                 'signature'=>$signature,
                 'imap'=>$imap,'smtp'=>$smtp,
-                'ghost'=>['api_base'=>$ghostBase,'api_token'=>$ghostToken,'name'=>$ghostName,'use_rag'=>isset($_POST['use_rag']),'use_history'=>isset($_POST['use_history'])],
+                'ghost'=>['api_base'=>$ghostBase,'api_token'=>$ghostToken,'use_rag'=>isset($_POST['use_rag']),'use_history'=>isset($_POST['use_history'])],
+                'autonomous_ghost'=>['api_token'=>$autonomousToken,'name'=>$ghostName],
                 'groups'=>$groups,'spaces'=>$spaces,'folders'=>$folders,
             ];
             $draft=$_SESSION['private_mail_install_draft'];
@@ -146,7 +149,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 ],
                 'owner'=>$draft['owner'],'signature'=>(string)$draft['signature'],
                 'imap'=>$draft['imap'],'smtp'=>$draft['smtp'],
-                'ghost'=>['api_base'=>$draft['ghost']['api_base'],'api_token'=>$draft['ghost']['api_token'],'name'=>$draft['ghost']['name']],
+                'ghost'=>['api_base'=>$draft['ghost']['api_base'],'api_token'=>$draft['ghost']['api_token']],
+                'autonomous_ghost'=>$draft['autonomous_ghost'],
                 'files'=>['space_id'=>$spaceId,'space_label'=>(string)($space['label']??$spaceId),'folder_id'=>''],
                 'mail'=>['folders'=>['inbox'=>$inboxName,'sent'=>$sentName,'ghost_deleted'=>$deletedName]],
                 'rules'=>['default'=>'summarize_notify'],
@@ -166,8 +170,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 $baselineCount+=(int)($syncResult['new_messages']??0);
             }
             if(!($syncResult['complete']??false))throw new RuntimeException('Initial mailbox baseline is larger than one installer run can finish. Retry installation; existing sync progress is saved privately.');
-            $ghost = new MantisBat\PrivateMail\GhostClient((string)$draft['ghost']['api_base'],(string)$draft['ghost']['api_token'],(string)$draft['app']['base_url'],$storage);
+            $ghost = new MantisBat\PrivateMail\GhostClient((string)$draft['ghost']['api_base'],(string)$draft['autonomous_ghost']['api_token'],(string)$draft['app']['base_url'],$storage);
             $backup = $ghost->installPresets((string)$configData['app']['api_key'],dirname(__DIR__).'/storage');
+            $worker = new MantisBat\PrivateMail\GhostClient((string)$draft['ghost']['api_base'],(string)$draft['ghost']['api_token'],(string)$draft['app']['base_url'],$storage);
+            $worker->removePrivateMailPresets(dirname(__DIR__).'/storage');
             $lockPath=dirname(__DIR__).'/storage/installed.lock';
             if(file_put_contents($lockPath,gmdate(DATE_ATOM),LOCK_EX)===false)throw new RuntimeException('Private Mail installed, but the installer lock could not be written.');
             @chmod($lockPath,0600);
@@ -207,7 +213,7 @@ function privateMailInstallH(string $value):string{return htmlspecialchars($valu
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Private Mail Setup | Mantis Bat</title><link rel="stylesheet" href="assets/theme.css"></head>
 <body><main class="page-shell">
-<header class="hero"><div class="brand-row"><img src="assets/mantis-mini.svg" alt="Mantis Bat"><div><p class="eyebrow">Standalone Mantis Bat Connector</p><h1><span class="gradient-text">Private Mail</span> setup</h1></div></div><p class="copy">Connect one mailbox, choose how new mail is handled, and install the private-mail presets into your Ghost.</p></header>
+<header class="hero"><div class="brand-row"><img src="assets/mantis-mini.svg" alt="Mantis Bat"><div><p class="eyebrow">Standalone Mantis Bat Connector</p><h1><span class="gradient-text">Private Mail</span> setup</h1></div></div><p class="copy">Connect one mailbox, choose how new mail is handled, and connect an agentic worker Ghost and a separate fully autonomous Ghost. Private Mail installs its presets only on the autonomous Ghost.</p></header>
 <?php if($output): ?><section class="card"><h2><span class="gradient-text">Installation complete</span></h2><p>Save these private URLs. Configure Hades cron to call the Cron URL once per minute.</p><?php foreach($output as $label=>$value):?><p><strong><?=privateMailInstallH((string)$label)?></strong><br><code><?=privateMailInstallH((string)$value)?></code></p><?php endforeach?><p class="field-help">Keep the App, Cron, Status, Health, and Installer unlock URLs private. The initial sync created a quiet mailbox baseline.</p></section><?php endif?>
 <?php if($error!==''):?><section class="card alert-card"><h2>Setup issue</h2><p><?=privateMailInstallH($error)?></p></section><?php endif?>
 <section class="card requirements"><h2>Requirements</h2><p>PHP 8.1+, cURL, PDO SQLite, OpenSSL, mbstring, iconv, HTTPS, writable private storage, and outbound IMAP, SMTP, Ghost API, and Ghost Files connections.</p><p>Expose only the staged public directory. Keep module <code>src/</code> and <code>storage/</code> private.</p></section>
@@ -225,7 +231,7 @@ function privateMailInstallH(string $value):string{return htmlspecialchars($valu
 <h3>Application and owner</h3><label>Public app base URL<input name="app_base_url" value="<?=privateMailInstallH((string)($posted['app_base_url']??''))?>" placeholder="https://example.com/private-mail" required></label><label>Timezone<input name="timezone" value="<?=privateMailInstallH((string)($posted['timezone']??'Europe/Berlin'))?>" required></label><label>Your name<input name="owner_name" value="<?=privateMailInstallH((string)($posted['owner_name']??''))?>" required></label><label>Your email<input type="email" name="owner_email" value="<?=privateMailInstallH((string)($posted['owner_email']??''))?>" required></label><label class="check-row"><input type="checkbox" name="signature_enabled" value="1" <?=isset($posted['signature_enabled'])?'checked':''?>> Add a text signature</label><label>Signature<textarea name="signature" rows="3"><?=privateMailInstallH((string)($posted['signature']??''))?></textarea></label>
 <h3>IMAP</h3><div class="form-grid"><label>IMAP host<input name="imap_host" value="<?=privateMailInstallH((string)($posted['imap_host']??''))?>" required></label><label>Port<input type="number" name="imap_port" value="<?=privateMailInstallH((string)($posted['imap_port']??'993'))?>" required></label></div><label>Username<input name="imap_username" value="<?=privateMailInstallH((string)($posted['imap_username']??''))?>" required></label><label>Password<input type="password" name="imap_password" autocomplete="new-password" required></label>
 <h3>SMTP</h3><div class="form-grid"><label>SMTP host<input name="smtp_host" value="<?=privateMailInstallH((string)($posted['smtp_host']??''))?>" required></label><label>Port<input type="number" name="smtp_port" value="<?=privateMailInstallH((string)($posted['smtp_port']??'465'))?>" required></label></div><label>Username<input name="smtp_username" value="<?=privateMailInstallH((string)($posted['smtp_username']??''))?>" required></label><label>Password<input type="password" name="smtp_password" autocomplete="new-password" required></label>
-<h3>Ghost API v2</h3><label>Mailbox Ghost name<input name="ghost_name" value="<?=privateMailInstallH((string)($posted['ghost_name']??''))?>" required><span class="field-help">Use the Ghost name as it appears in chat.</span></label><label>Ghost API base<input name="ghost_api_base" value="<?=privateMailInstallH((string)($posted['ghost_api_base']??'https://dev.telmi-ai.com/api/ghost/v2'))?>" required></label><label>Ghost JWT<input type="password" name="ghost_api_token" autocomplete="new-password" required><span class="field-help">Stored only in private server configuration.</span></label><label class="check-row"><input type="checkbox" name="use_rag" value="1" <?=!isset($posted['action'])||isset($posted['use_rag'])?'checked':''?>> Use Ghost RAG for private-mail processing</label><label class="check-row"><input type="checkbox" name="use_history" value="1" <?=!isset($posted['action'])||isset($posted['use_history'])?'checked':''?>> Use Ghost chat history independently</label>
+<h3>Ghost API v2</h3><label>Autonomous Ghost name<input name="ghost_name" value="<?=privateMailInstallH((string)($posted['ghost_name']??''))?>" required><span class="field-help">Use the autonomous Ghost name as it appears in chat.</span></label><label>Ghost API base<input name="ghost_api_base" value="<?=privateMailInstallH((string)($posted['ghost_api_base']??'https://dev.telmi-ai.com/api/ghost/v2'))?>" required></label><label>Worker Ghost JWT<input type="password" name="ghost_api_token" autocomplete="new-password" required><span class="field-help">The worker needs agentic mode. It summarizes mail, sends notifications, and hands missions to the autonomous Ghost.</span></label><label>Autonomous Ghost JWT<input type="password" name="autonomous_ghost_token" autocomplete="new-password" required><span class="field-help">A different Ghost with agentic and autonomous mode enabled. Private Mail installs its presets on this Ghost.</span></label><label class="check-row"><input type="checkbox" name="use_rag" value="1" <?=!isset($posted['action'])||isset($posted['use_rag'])?'checked':''?>> Use Ghost RAG for private-mail processing</label><label class="check-row"><input type="checkbox" name="use_history" value="1" <?=!isset($posted['action'])||isset($posted['use_history'])?'checked':''?>> Use Ghost chat history independently</label>
 <label>Installer unlock secret<input type="password" value="<?=privateMailInstallH($installerSecret)?>" readonly><span class="field-help">The protected installer unlock URL is shown after setup.</span></label><button type="submit">Check connections and find mailbox folders</button></form></section>
 <?php endif?>
 </main><div class="setup-loading" id="setup-loading" hidden role="status" aria-live="polite"><div class="setup-loading-card"><span class="setup-spinner" aria-hidden="true"></span><strong id="setup-loading-text">Working…</strong><p>Please keep this page open. Mailbox synchronization can take several minutes.</p></div></div><script>
