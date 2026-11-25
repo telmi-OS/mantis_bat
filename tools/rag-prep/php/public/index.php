@@ -18,7 +18,18 @@ if (!$config->isInstalled()) {
     exit;
 }
 
-ragPrepRequireAccess($config, $security);
+if (!ragPrepGrantAccessIfValid($config, $security)) {
+    $accessKey = isset($_POST['app_key']) && is_string($_POST['app_key']) ? trim($_POST['app_key']) : '';
+    if ($security->constantTimeEquals((string) $config->get('app.access_secret', ''), $accessKey)) {
+        session_regenerate_id(true);
+        $_SESSION['mantis_bat_rag_prep_access'] = hash('sha256', (string) $config->get('app.access_secret', ''));
+        header('Location: index.php', true, 303);
+        exit;
+    }
+    header('Cache-Control: no-store');
+    ?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open RAG Prep</title><link rel="stylesheet" href="assets/theme.css"></head><body><main class="page-shell"><section class="card"><h1>Open RAG Prep</h1><p class="copy">Enter the access token from your saved App URL (the value after <code>key=</code>), or open the complete App URL.</p><?php if ($accessKey !== ''): ?><p>Access token not recognized.</p><?php endif; ?><form method="post"><label>App access token<input type="password" name="app_key" autocomplete="off" required></label><button type="submit">Open RAG Prep</button></form></section></main></body></html><?php
+    exit;
+}
 
 $csrfToken = $_SESSION['mantis_bat_rag_prep_dashboard_csrf'] ?? $security->randomToken(16);
 $_SESSION['mantis_bat_rag_prep_dashboard_csrf'] = $csrfToken;
@@ -118,15 +129,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new RuntimeException('Could not create upload directory.');
         }
 
-        $jobId = $storage->createJob($jobUuid, $title, $guidance);
-        foreach ($validatedFiles as $file) {
-            $storedName = sprintf('%02d-%s.%s', (int) $file['index'] + 1, $security->randomToken(6), $file['extension']);
-            $storedPath = $uploadDir . '/' . $storedName;
-            if (!move_uploaded_file($file['tmp_name'], $storedPath)) {
-                throw new RuntimeException('Could not move uploaded file into storage.');
+        $movedFiles = [];
+        try {
+            foreach ($validatedFiles as $file) {
+                $storedName = sprintf('%02d-%s.%s', (int) $file['index'] + 1, $security->randomToken(6), $file['extension']);
+                $storedPath = $uploadDir . '/' . $storedName;
+                if (!move_uploaded_file($file['tmp_name'], $storedPath)) {
+                    throw new RuntimeException('Could not move uploaded file into storage.');
+                }
+                $file['stored_path'] = $storedPath;
+                $movedFiles[] = $file;
             }
-
-            $storage->addJobFile($jobId, $file['original_name'], $storedPath, $file['mime_type'], $file['extension'], $file['size']);
+            $storage->createJobWithFiles($jobUuid, $title, $guidance, $movedFiles);
+        } catch (Throwable $exception) {
+            foreach ($movedFiles as $file) {
+                @unlink($file['stored_path']);
+            }
+            @rmdir($uploadDir);
+            throw $exception;
         }
 
         $message = 'Job created. Cron will extract the documents and ask your Ghost to build the final telmi OS-ready txt artifact.';
@@ -218,6 +238,10 @@ $limits = [
                             <span><?= (int) ($job['input_char_count'] ?? 0) ?> input chars / <?= (int) ($job['output_char_count'] ?? 0) ?> output chars</span><br>
                             <?php if ((string) ($job['error_message'] ?? '') !== ''): ?>
                                 <span><?= htmlspecialchars((string) $job['error_message'], ENT_QUOTES, 'UTF-8') ?></span><br>
+                            <?php endif; ?>
+                            <?php if ((string) ($job['notification_status'] ?? '') !== ''): ?>
+                                <span>Group update: <?= htmlspecialchars(match ($job['notification_status']) { 'pending' => 'waiting for cron', 'sending' => 'sending', 'requested' => 'requested from Ghost; check group chat for delivery', 'uncertain' => 'delivery uncertain; check group chat', default => 'not sent' }, ENT_QUOTES, 'UTF-8') ?></span><br>
+                                <?php if ((string) ($job['notification_error'] ?? '') !== ''): ?><span><?= htmlspecialchars((string) $job['notification_error'], ENT_QUOTES, 'UTF-8') ?></span><br><?php endif; ?>
                             <?php endif; ?>
                             <?php if ((string) ($job['status'] ?? '') === 'completed'): ?>
                                 <a href="download.php?id=<?= (int) $job['id'] ?>">Download TXT Artifact</a>

@@ -34,7 +34,8 @@ $appUrl = '';
 $installerUnlockUrl = '';
 $accessSecret = '';
 $unlockAllowed = false;
-$configWritten = false;
+$_SESSION['rag_prep_install_cron_secret'] ??= $security->randomToken(24);
+$_SESSION['rag_prep_install_unlock_secret'] ??= $security->randomToken(16);
 
 $existingConfig = new MantisBat\RuntimeConfig($installer->configPath());
 if ($locked) {
@@ -44,10 +45,11 @@ if ($locked) {
 $defaults = [
     'app_base_url' => (string) ($_POST['app_base_url'] ?? ''),
     'app_timezone' => (string) ($_POST['app_timezone'] ?? 'Europe/Berlin'),
-    'app_cron_secret' => (string) ($_POST['app_cron_secret'] ?? $security->randomToken(12)),
+    'app_cron_secret' => (string) $_SESSION['rag_prep_install_cron_secret'],
     'ghost_api_base' => (string) ($_POST['ghost_api_base'] ?? 'https://dev.telmi-ai.com/api/ghost/v2'),
     'ghost_api_token' => (string) ($_POST['ghost_api_token'] ?? ''),
-    'installer_secret' => (string) ($_POST['installer_secret'] ?? $security->randomToken(10)),
+    'installer_secret' => (string) $_SESSION['rag_prep_install_unlock_secret'],
+    'notification_group' => trim((string) ($_POST['notification_group'] ?? '')),
 ];
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
@@ -73,8 +75,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         }
 
         $baseUrl = rtrim(trim($defaults['app_base_url']), '/');
-        if ($baseUrl === '' || !filter_var($baseUrl, FILTER_VALIDATE_URL)) {
-            throw new RuntimeException('App base URL must be a valid absolute URL.');
+        if ($baseUrl === '' || !filter_var($baseUrl, FILTER_VALIDATE_URL) || strtolower((string) parse_url($baseUrl, PHP_URL_SCHEME)) !== 'https') {
+            throw new RuntimeException('App base URL must be a valid HTTPS URL.');
+        }
+        if (mb_strlen($defaults['notification_group']) > 180 || preg_match('/[\x00-\x1f\x7f]/u', $defaults['notification_group'])) {
+            throw new RuntimeException('Enter a valid group chat name.');
         }
 
         $ghostApiBase = rtrim(trim($defaults['ghost_api_base']), '/');
@@ -104,6 +109,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     'settings' => '/settings',
                 ],
             ],
+            'notifications' => ['group_name' => $defaults['notification_group']],
             'limits' => [
                 'max_file_size_mb' => 7,
                 'max_job_size_mb' => 7,
@@ -121,10 +127,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             ],
         ];
 
-        $installer->writeConfig($config);
-        $configWritten = true;
-
-        $runtimeConfig = new MantisBat\RuntimeConfig($installer->configPath());
+        $runtimeConfig = new MantisBat\RuntimeConfig($installer->configPath(), $config);
         $logger = new MantisBat\Logger($security, $storage, $installer->logPath(), [(string) $runtimeConfig->get('ghost.api_token', '')]);
         $ghost = new MantisBat\GhostClient($runtimeConfig, $logger);
         $ghostProbe = $ghost->probeSettings();
@@ -147,7 +150,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             ));
         }
 
-        $installer->lock();
+        if (!$locked) {
+            $installer->lock();
+        }
+        try {
+            $installer->writeConfig($config);
+        } catch (Throwable $exception) {
+            if (!$locked) {
+                @unlink($installer->lockPath());
+            }
+            throw $exception;
+        }
         $appUrl = $baseUrl . '/index.php?key=' . rawurlencode($accessSecret);
         $cronUrl = $baseUrl . '/cron.php?key=' . rawurlencode((string) $config['app']['cron_secret']);
         $statusUrl = $baseUrl . '/status.php?key=' . rawurlencode((string) $config['app']['status_secret']);
@@ -155,11 +168,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $maintenanceUrl = $baseUrl . '/maintenance.php?key=' . rawurlencode((string) $config['app']['status_secret']);
         $installerUnlockUrl = $baseUrl . '/install.php?unlock=' . rawurlencode($defaults['installer_secret']);
         $message = "Install complete.\nGhost API validated.\nRAG prep tool is ready.";
+        unset($_SESSION['rag_prep_install_cron_secret'], $_SESSION['rag_prep_install_unlock_secret']);
     } catch (Throwable $exception) {
-        if ($configWritten && !$locked) {
-            @unlink($installer->configPath());
-            @unlink($installer->lockPath());
-        }
         error_log('[Mantis Bat rag-prep installer] ' . $exception->getMessage());
         $message = $exception->getMessage();
     }
@@ -205,6 +215,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 <pre><?= htmlspecialchars($appUrl, ENT_QUOTES, 'UTF-8') ?></pre>
                 <p><strong>Cron URL</strong></p>
                 <pre><?= htmlspecialchars($cronUrl, ENT_QUOTES, 'UTF-8') ?></pre>
+                <p class="field-help">Configure Hades cron to call this URL once per minute. Jobs and notifications are processed on separate cron calls.</p>
                 <p><strong>Status URL</strong></p>
                 <pre><?= htmlspecialchars($statusUrl, ENT_QUOTES, 'UTF-8') ?></pre>
                 <p><strong>Health URL</strong></p>
@@ -222,6 +233,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     <?php endif; ?>
 
     <section class="card-grid">
+        <?php if ((!$locked || $unlockAllowed) && $appUrl === ''): ?>
         <section class="card">
             <h2><span class="gradient-text">Requirements</span></h2>
             <ul>
@@ -244,24 +256,25 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     <input type="text" name="app_timezone" value="<?= htmlspecialchars($defaults['app_timezone'], ENT_QUOTES, 'UTF-8') ?>" required>
                 </label>
                 <label>
-                    Cron Secret
-                    <input type="text" name="app_cron_secret" value="<?= htmlspecialchars($defaults['app_cron_secret'], ENT_QUOTES, 'UTF-8') ?>" required>
-                </label>
-                <label>
                     Ghost API Base
                     <input type="text" name="ghost_api_base" value="<?= htmlspecialchars($defaults['ghost_api_base'], ENT_QUOTES, 'UTF-8') ?>" required>
                 </label>
                 <label>
                     Ghost JWT
-                    <input type="text" name="ghost_api_token" value="<?= htmlspecialchars($defaults['ghost_api_token'], ENT_QUOTES, 'UTF-8') ?>" required>
+                    <input type="password" name="ghost_api_token" value="<?= htmlspecialchars($defaults['ghost_api_token'], ENT_QUOTES, 'UTF-8') ?>" autocomplete="new-password" required>
                 </label>
                 <label>
-                    Installer Unlock Secret
-                    <input type="text" name="installer_secret" value="<?= htmlspecialchars($defaults['installer_secret'], ENT_QUOTES, 'UTF-8') ?>" required>
+                    Notification group chat name (optional)
+                    <span class="field-help">Use the exact group name known to your Ghost. Enable its agentic messaging tool and ensure it can send to this group. Leave empty to disable notifications.</span>
+                    <input type="text" name="notification_group" maxlength="180" value="<?= htmlspecialchars($defaults['notification_group'], ENT_QUOTES, 'UTF-8') ?>">
                 </label>
+                <p class="field-help">The app, cron and installer unlock credentials are generated automatically and shown after setup.</p>
                 <button type="submit">Install RAG Prep Tool</button>
             </form>
         </section>
+        <?php elseif ($locked && !$unlockAllowed): ?>
+        <section class="card"><h2>Installer locked</h2><p>Use your private installer unlock URL to change this setup.</p></section>
+        <?php endif; ?>
     </section>
 </div>
 </body>

@@ -20,11 +20,15 @@ final class JobProcessor
 
     public function processNext(): array
     {
+        $notification = $this->storage->nextNotification();
+        if ($notification !== null) {
+            return $this->processNotification($notification);
+        }
         $maxAttempts = min(3, max(1, (int) $this->config->get('limits.max_attempts', 3)));
         $retryDelays = $this->config->get('limits.retry_delays_seconds', [60, 300]);
         $firstRetryDelay = is_array($retryDelays) && isset($retryDelays[0]) ? max(0, (int) $retryDelays[0]) : 60;
         $staleJobSeconds = max(1, (int) $this->config->get('limits.stale_job_seconds', 60));
-        $job = $this->storage->nextPendingJob($maxAttempts, $staleJobSeconds, $firstRetryDelay);
+        $job = $this->storage->nextPendingJob($maxAttempts, $staleJobSeconds, $firstRetryDelay, $this->notificationsEnabled());
         if ($job === null) {
             return ['ok' => true, 'processed' => false, 'reason' => 'no_pending_job'];
         }
@@ -103,7 +107,7 @@ final class JobProcessor
             }
 
             $this->storage->updateJobOutput($jobId, $outputPath, mb_strlen($artifact));
-            $this->storage->updateJobStatus($jobId, 'completed');
+            $this->storage->updateJobStatus($jobId, 'completed', null, $this->notificationsEnabled());
 
             $this->logger?->info('RAG prep job completed.', [
                 'job_id' => $jobId,
@@ -136,7 +140,7 @@ final class JobProcessor
             $this->storage->markRetryable($jobId, $exception->getMessage(), $nextAttemptAt);
             $status = 'retryable';
         } else {
-            $this->storage->updateJobStatus($jobId, 'failed', $exception->getMessage());
+            $this->storage->updateJobStatus($jobId, 'failed', $exception->getMessage(), $this->notificationsEnabled());
         }
 
         $this->logger?->exception($exception, [
@@ -156,6 +160,31 @@ final class JobProcessor
             'next_attempt_at' => $nextAttemptAt,
             'error' => $exception->getMessage(),
         ];
+    }
+
+    private function notificationsEnabled(): bool
+    {
+        return trim((string) $this->config->get('notifications.group_name', '')) !== '';
+    }
+
+    private function processNotification(array $job): array
+    {
+        $jobId = (int) $job['id'];
+        $group = trim((string) $this->config->get('notifications.group_name', ''));
+        if ($group === '') {
+            $this->storage->updateNotification($jobId, 'failed', 'Notification destination is no longer configured.');
+            return ['ok' => false, 'notification' => 'failed', 'job_id' => $jobId];
+        }
+        $this->storage->updateNotification($jobId, 'sending');
+        try {
+            $this->ghostClient->notifyGroup($group, (string) $job['title'], (string) $job['status']);
+            $this->storage->updateNotification($jobId, 'requested');
+            return ['ok' => true, 'notification' => 'requested', 'job_id' => $jobId];
+        } catch (\Throwable $exception) {
+            $this->storage->updateNotification($jobId, 'uncertain', 'Notification request failed or its delivery could not be confirmed. Check the group chat.');
+            $this->logger?->exception($exception, ['job_id' => $jobId, 'operation' => 'notification']);
+            return ['ok' => false, 'notification' => 'uncertain', 'job_id' => $jobId];
+        }
     }
 
     private function retryDelayForAttempt(int $attemptNumber): int

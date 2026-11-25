@@ -164,17 +164,23 @@ try {
     $extractor = new DocumentExtractor($config);
 
     $txtPath = $temporaryRoot . '/sample.txt';
-    file_put_contents($txtPath, "TXT extraction works.\n");
+    file_put_contents($txtPath, "TXT extraction works.\nA well-\nknown fact.\n");
     hadesExpectContains('TXT extraction works.', $extractor->extract($txtPath, 'txt'), 'TXT extraction failed.');
+    hadesExpectContains('well-', $extractor->extract($txtPath, 'txt'), 'A hyphen at a line break was removed.');
 
     $docxPath = $temporaryRoot . '/sample.docx';
     $zip = new ZipArchive();
     hadesExpect($zip->open($docxPath, ZipArchive::CREATE) === true, 'Could not create DOCX fixture.');
-    $zip->addFromString('word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>DOCX first paragraph.</w:t></w:r></w:p><w:p><w:r><w:t>DOCX second paragraph.</w:t></w:r></w:p></w:body></w:document>');
+    $zip->addFromString('word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>DOCX first paragraph.</w:t><w:tab/><w:t>Tab text.</w:t><w:br/><w:t>Break text.</w:t></w:r></w:p><w:p><w:r><w:t>DOCX second paragraph.</w:t></w:r></w:p></w:body></w:document>');
+    $zip->addFromString('word/header1.xml', '<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>Header content.</w:t></w:r></w:p></w:hdr>');
+    $zip->addFromString('word/footnotes.xml', '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:footnote><w:p><w:r><w:t>Footnote content.</w:t></w:r></w:p></w:footnote></w:footnotes>');
     $zip->close();
     $docxText = $extractor->extract($docxPath, 'docx');
     hadesExpectContains('DOCX first paragraph.', $docxText, 'DOCX first paragraph was not extracted.');
     hadesExpectContains('DOCX second paragraph.', $docxText, 'DOCX second paragraph was not extracted.');
+    hadesExpectContains("Tab text.\nBreak text.", $docxText, 'DOCX line break was not preserved.');
+    hadesExpectContains('Header content.', $docxText, 'DOCX header was not extracted.');
+    hadesExpectContains('Footnote content.', $docxText, 'DOCX footnote was not extracted.');
 
     $pdfPath = $temporaryRoot . '/sample.pdf';
     file_put_contents($pdfPath, hadesMakePdf("BT /F1 12 Tf 72 720 Td (Pure PHP PDF extraction works.) Tj ET"));
@@ -227,6 +233,18 @@ try {
     $retryConfig = new RuntimeConfig($retryConfigPath);
     $storage = new Storage($installer->databasePath());
     $storage->migrate();
+    $fileRecord = ['original_name' => 'one.txt', 'stored_path' => '/tmp/one.txt', 'mime_type' => 'text/plain', 'extension' => 'txt', 'size' => 1];
+    try {
+        $badRecord = $fileRecord;
+        $badRecord['mime_type'] = null;
+        $storage->createJobWithFiles('failed-atomic-job', 'Atomic test', '', [$fileRecord, $badRecord]);
+        throw new RuntimeException('Invalid job file was accepted.');
+    } catch (TypeError $exception) {
+        hadesExpect($storage->getJobByUuid('failed-atomic-job') === null, 'A partial job remained after a file insert failed.');
+    }
+    $atomicId = $storage->createJobWithFiles('atomic-job', 'Atomic test', '', [$fileRecord, $fileRecord]);
+    hadesExpect(count($storage->listJobFiles($atomicId)) === 2, 'Atomic job did not contain all files.');
+    $storage->resetJobs();
     $retryFile = $retryRoot . '/storage/uploads/retry.txt';
     file_put_contents($retryFile, 'Retry extraction source.');
     $jobId = $storage->createJob('retry-job', 'Retry job', '');
@@ -253,6 +271,23 @@ try {
     $job = $storage->getJob($jobId);
     hadesExpect(($job['attempt_count'] ?? 0) === 3, 'Third attempt was not persisted.');
     hadesExpect(str_contains((string) ($job['last_error'] ?? ''), 'Ghost API request failed'), 'Last retry error was not persisted.');
+
+    $notificationConfig = new RuntimeConfig($retryConfigPath, [
+        'ghost' => ['api_base' => 'https://127.0.0.1:1', 'api_token' => 'test-token'],
+        'notifications' => ['group_name' => 'Test group'],
+    ]);
+    $notificationProcessor = new JobProcessor($notificationConfig, $storage, new GhostClient($notificationConfig), new DocumentExtractor($notificationConfig), $installer);
+    $storage->updateJobStatus($jobId, 'completed', null, true);
+    hadesExpect(($storage->getJob($jobId)['notification_status'] ?? '') === 'pending', 'Terminal job did not queue its notification.');
+    $notificationResult = $notificationProcessor->processNext();
+    $job = $storage->getJob($jobId);
+    hadesExpect(($notificationResult['notification'] ?? '') === 'uncertain', 'A failed notification request was not marked uncertain.');
+    hadesExpect(($job['status'] ?? '') === 'completed', 'Notification failure changed the job outcome.');
+    hadesExpect(($job['notification_status'] ?? '') === 'uncertain', 'Notification outcome was not persisted.');
+    hadesExpect(($notificationProcessor->processNext()['processed'] ?? null) === false, 'Uncertain notifications must not be automatically resent.');
+    $storage->updateNotification($jobId, 'sending');
+    $storage->nextNotification();
+    hadesExpect(($storage->getJob($jobId)['notification_status'] ?? '') === 'uncertain', 'Interrupted notification was not marked uncertain.');
 
     echo "Hades compatibility checks passed.\n";
 } finally {

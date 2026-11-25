@@ -34,7 +34,7 @@ final class DocumentExtractor
             default => throw new RuntimeException('Unsupported file type: ' . $extension),
         };
 
-        $normalized = $this->normalizeText($text);
+        $normalized = $this->normalizeText($text, $extension === 'docx');
         if ($normalized === '') {
             throw new RuntimeException('Document extraction produced no usable text.');
         }
@@ -88,13 +88,30 @@ final class DocumentExtractor
             throw new RuntimeException('Could not open DOCX archive.');
         }
 
-        $documentXml = $zip->getFromName('word/document.xml');
-        $zip->close();
-
-        if (!is_string($documentXml) || trim($documentXml) === '') {
-            throw new RuntimeException('DOCX document.xml is missing.');
+        $names = ['word/document.xml'];
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = $zip->getNameIndex($i);
+            if (is_string($name) && preg_match('~^word/(?:header[0-9]+|footer[0-9]+|footnotes|endnotes)\.xml$~', $name)) {
+                $names[] = $name;
+            }
         }
+        $paragraphs = [];
+        try {
+            foreach ($names as $name) {
+                $documentXml = $zip->getFromName($name);
+                if (!is_string($documentXml) || trim($documentXml) === '') {
+                    throw new RuntimeException('DOCX XML part is missing: ' . $name);
+                }
+                $paragraphs = array_merge($paragraphs, $this->extractDocxXml($documentXml));
+            }
+        } finally {
+            $zip->close();
+        }
+        return implode("\n\n", $paragraphs);
+    }
 
+    private function extractDocxXml(string $documentXml): array
+    {
         $dom = new DOMDocument();
         $loaded = @$dom->loadXML($documentXml, LIBXML_NONET | LIBXML_NOBLANKS);
         if ($loaded !== true) {
@@ -107,8 +124,12 @@ final class DocumentExtractor
         $paragraphs = [];
         foreach ($xpath->query('//w:p') ?: [] as $paragraphNode) {
             $parts = [];
-            foreach ($xpath->query('.//w:t', $paragraphNode) ?: [] as $textNode) {
-                $parts[] = $textNode->textContent;
+            foreach ($xpath->query('.//w:t | .//w:tab | .//w:br | .//w:cr', $paragraphNode) ?: [] as $textNode) {
+                $parts[] = match ($textNode->localName) {
+                    'tab' => "\t",
+                    'br', 'cr' => "\n",
+                    default => $textNode->textContent,
+                };
             }
 
             $paragraph = trim(implode('', $parts));
@@ -117,10 +138,10 @@ final class DocumentExtractor
             }
         }
 
-        return implode("\n\n", $paragraphs);
+        return $paragraphs;
     }
 
-    private function normalizeText(string $text): string
+    private function normalizeText(string $text, bool $preserveLineBreaks = false): string
     {
         $text = $this->toUtf8($text);
         $text = preg_replace('/^\xEF\xBB\xBF/', '', $text) ?? $text;
@@ -128,7 +149,6 @@ final class DocumentExtractor
         $text = preg_replace("/[ \t]+\n/", "\n", $text) ?? $text;
         $text = preg_replace("/\t+/", ' ', $text) ?? $text;
         $text = preg_replace("/[ ]{2,}/", ' ', $text) ?? $text;
-        $text = preg_replace("/([[:alpha:]])-\n([[:alpha:]])/u", '$1$2', $text) ?? $text;
         $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
 
         $paragraphs = preg_split("/\n\s*\n/", $text) ?: [];
@@ -139,7 +159,9 @@ final class DocumentExtractor
                 continue;
             }
 
-            $paragraph = preg_replace("/(?<![\.\:\;\?\!])\n(?![\-\*\d])/", ' ', $paragraph) ?? $paragraph;
+            if (!$preserveLineBreaks) {
+                $paragraph = preg_replace("/(?<![\.\:\;\?\!])\n(?![\-\*\d])/", ' ', $paragraph) ?? $paragraph;
+            }
             $paragraph = preg_replace("/\n+/", "\n", $paragraph) ?? $paragraph;
             $paragraph = preg_replace("/[ ]{2,}/", ' ', $paragraph) ?? $paragraph;
             $paragraph = trim($paragraph);

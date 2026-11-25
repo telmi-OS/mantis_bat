@@ -15,14 +15,17 @@ $services = require $moduleRoot . '/src/bootstrap.php';
 function ragPrepGrantAccessIfValid(MantisBat\RuntimeConfig $config, MantisBat\Security $security): bool
 {
     $sessionKey = 'mantis_bat_rag_prep_access';
-    if (($_SESSION[$sessionKey] ?? false) === true) {
+    $expectedKey = (string) $config->get('app.access_secret', '');
+    $sessionFingerprint = hash('sha256', $expectedKey);
+    if ($expectedKey !== '' && $security->constantTimeEquals($sessionFingerprint, is_string($_SESSION[$sessionKey] ?? null) ? $_SESSION[$sessionKey] : null)) {
         return true;
     }
+    unset($_SESSION[$sessionKey]);
 
     $providedKey = isset($_GET['key']) && is_string($_GET['key']) ? $_GET['key'] : '';
-    $expectedKey = (string) $config->get('app.access_secret', '');
     if ($expectedKey !== '' && $security->constantTimeEquals($expectedKey, $providedKey)) {
-        $_SESSION[$sessionKey] = true;
+        session_regenerate_id(true);
+        $_SESSION[$sessionKey] = $sessionFingerprint;
         return true;
     }
 
