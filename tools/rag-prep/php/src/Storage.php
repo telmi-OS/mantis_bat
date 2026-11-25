@@ -74,6 +74,8 @@ final class Storage
         $this->ensureColumn('jobs', 'last_error', 'TEXT');
         $this->ensureColumn('jobs', 'attempt_count', 'INTEGER NOT NULL DEFAULT 0');
         $this->ensureColumn('jobs', 'next_attempt_at', 'INTEGER NOT NULL DEFAULT 0');
+        $this->ensureColumn('jobs', 'notification_status', "TEXT NOT NULL DEFAULT ''");
+        $this->ensureColumn('jobs', 'notification_error', "TEXT NOT NULL DEFAULT ''");
 
         $this->pdo->query('PRAGMA foreign_keys = ON');
     }
@@ -140,6 +142,25 @@ final class Storage
         ]);
     }
 
+    public function createJobWithFiles(string $jobUuid, string $title, string $guidance, array $files): int
+    {
+        if ($files === []) {
+            throw new RuntimeException('Job has no uploaded files.');
+        }
+        $this->pdo->beginTransaction();
+        try {
+            $jobId = $this->createJob($jobUuid, $title, $guidance);
+            foreach ($files as $file) {
+                $this->addJobFile($jobId, $file['original_name'], $file['stored_path'], $file['mime_type'], $file['extension'], $file['size']);
+            }
+            $this->pdo->commit();
+            return $jobId;
+        } catch (\Throwable $exception) {
+            $this->pdo->rollBack();
+            throw $exception;
+        }
+    }
+
     public function listJobs(int $limit = 50): array
     {
         $stmt = $this->pdo->prepare('
@@ -180,9 +201,9 @@ final class Storage
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    public function nextPendingJob(int $maxAttempts = 3, int $staleAfterSeconds = 60, int $staleRetryDelaySeconds = 60): ?array
+    public function nextPendingJob(int $maxAttempts = 3, int $staleAfterSeconds = 60, int $staleRetryDelaySeconds = 60, bool $notify = false): ?array
     {
-        $this->recoverStaleJobs($maxAttempts, $staleAfterSeconds, $staleRetryDelaySeconds);
+        $this->recoverStaleJobs($maxAttempts, $staleAfterSeconds, $staleRetryDelaySeconds, $notify);
 
         $stmt = $this->pdo->prepare("SELECT * FROM jobs WHERE status IN ('uploaded', 'retryable') AND attempt_count < :max_attempts AND next_attempt_at <= :now ORDER BY created_at ASC LIMIT 1");
         $stmt->execute([
@@ -208,17 +229,31 @@ final class Storage
         }
     }
 
-    public function updateJobStatus(int $jobId, string $status, ?string $errorMessage = null): void
+    public function updateJobStatus(int $jobId, string $status, ?string $errorMessage = null, bool $notify = false): void
     {
         $now = time();
-        $stmt = $this->pdo->prepare('UPDATE jobs SET status = :status, error_message = :error_message, last_error = :last_error, next_attempt_at = 0, updated_at = :updated_at, started_at = CASE WHEN :status = \'extracting\' AND started_at IS NULL THEN :updated_at ELSE started_at END, completed_at = CASE WHEN :status IN (\'completed\', \'failed\') THEN :updated_at ELSE completed_at END WHERE id = :id');
+        $stmt = $this->pdo->prepare('UPDATE jobs SET status = :status, error_message = :error_message, last_error = :last_error, next_attempt_at = 0, notification_status = CASE WHEN :notify THEN \'pending\' ELSE notification_status END, updated_at = :updated_at, started_at = CASE WHEN :status = \'extracting\' AND started_at IS NULL THEN :updated_at ELSE started_at END, completed_at = CASE WHEN :status IN (\'completed\', \'failed\') THEN :updated_at ELSE completed_at END WHERE id = :id');
         $stmt->execute([
             ':status' => $status,
             ':error_message' => $errorMessage,
             ':last_error' => $errorMessage,
+            ':notify' => $notify ? 1 : 0,
             ':updated_at' => $now,
             ':id' => $jobId,
         ]);
+    }
+
+    public function nextNotification(): ?array
+    {
+        $this->pdo->exec("UPDATE jobs SET notification_status = 'uncertain', notification_error = 'The previous notification was interrupted. Check the group chat before sending again.' WHERE notification_status = 'sending'");
+        $row = $this->pdo->query("SELECT * FROM jobs WHERE notification_status = 'pending' ORDER BY completed_at, id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+
+    public function updateNotification(int $jobId, string $status, string $error = ''): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE jobs SET notification_status = :status, notification_error = :error WHERE id = :id');
+        $stmt->execute([':status' => $status, ':error' => $error, ':id' => $jobId]);
     }
 
     public function markRetryable(int $jobId, string $errorMessage, int $nextAttemptAt): void
@@ -354,7 +389,7 @@ final class Storage
         $this->pdo->commit();
     }
 
-    private function recoverStaleJobs(int $maxAttempts, int $staleAfterSeconds, int $staleRetryDelaySeconds): void
+    private function recoverStaleJobs(int $maxAttempts, int $staleAfterSeconds, int $staleRetryDelaySeconds, bool $notify): void
     {
         $staleBefore = time() - max(1, $staleAfterSeconds);
         $stmt = $this->pdo->prepare("SELECT id, attempt_count FROM jobs WHERE status IN ('extracting', 'processing') AND updated_at < :stale_before");
@@ -369,7 +404,7 @@ final class Storage
                 continue;
             }
 
-            $this->updateJobStatus($jobId, 'failed', $message);
+            $this->updateJobStatus($jobId, 'failed', $message, $notify);
         }
     }
 

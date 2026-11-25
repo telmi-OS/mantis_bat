@@ -62,6 +62,8 @@ It is asked to produce self-contained semantic memory blocks that:
 - cron worker for extraction and Ghost processing
 - private status / health / maintenance URLs
 
+Optional group notifications can be configured during installation using the exact group name known to the Ghost. Enable the Ghost's agentic messaging tool and give it access to that group. Once a job completes or finally fails, a later cron call asks the Ghost in realtime to send a short update, with RAG and history enabled. Notifications contain the job title and outcome, not the document contents. The dashboard shows the request state; a Ghost reply does not prove delivery, so check the group chat. An interrupted or failed request is marked uncertain and is not automatically repeated to avoid duplicates. Notification problems do not change the job outcome. Schedule cron once per minute.
+
 ## Dashboard Access
 
 The dashboard does not use a traditional username-and-password login. After setup, the installer displays an access URL in this form:

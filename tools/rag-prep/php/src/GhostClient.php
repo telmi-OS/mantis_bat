@@ -50,6 +50,22 @@ final class GhostClient
         return $this->normalizeGhostOutput($reply);
     }
 
+    public function notifyGroup(string $groupName, string $title, string $status): void
+    {
+        $result = $this->request('POST', (string) $this->config->get('ghost.paths.chat', '/chat'), [
+            'message' => 'Tell ' . $groupName . ' this short RAG Prep update: Job “' . $title . '” ' . ($status === 'completed' ? 'finished successfully. The TXT artifact is ready in RAG Prep.' : 'failed. Open RAG Prep to see the error.') . ' Send this update to the group chat using your messaging tool.',
+            'mode' => 'realtime',
+            'use_history' => true,
+            'history' => true,
+            'options' => ['mode' => 'realtime', 'use_rag' => true, 'use_history' => true],
+            'meta' => ['source' => 'mantis_bat_rag_prep', 'channel' => 'web'],
+        ]);
+        $reply = $this->extractReply($result);
+        if ($reply === '' || stripos($reply, 'message not sent') !== false) {
+            throw new RuntimeException('Ghost did not confirm the notification request. Check the group chat.');
+        }
+    }
+
     private function buildPrompt(string $title, string $guidance, string $normalizedText): string
     {
         $guidance = trim($guidance);
@@ -75,7 +91,7 @@ Chunking rules:
 - Preserve facts exactly, including names, dates, numbers, URLs, product names, and claims.
 - Keep the original language of the source text.
 - Remove obvious extraction noise such as repeated headers, footers, page numbers, broken line-wraps, and OCR junk.
-- Repair whitespace and line-break hyphenation where needed.
+- Repair whitespace where needed; preserve hyphens when their intended use is uncertain.
 - Keep headings together with their relevant content.
 - Keep short lists together if they belong to one coherent idea.
 - If a section is long, split it into multiple chunks at natural semantic boundaries.

@@ -12,10 +12,10 @@ final class RuntimeConfig
     private array $data;
     private ?string $buildFingerprint = null;
 
-    public function __construct(string $configPath)
+    public function __construct(string $configPath, ?array $candidate = null)
     {
         $this->configPath = $configPath;
-        $this->data = $this->load();
+        $this->data = $candidate === null ? $this->load() : $this->mergeRecursive($this->defaults(), $candidate);
         date_default_timezone_set((string) $this->get('app.timezone', 'UTC'));
     }
 
@@ -81,6 +81,9 @@ final class RuntimeConfig
                 'api_base' => $this->get('ghost.api_base'),
                 'api_token' => $security->maskSecret((string) $this->get('ghost.api_token', '')),
             ],
+            'notifications' => [
+                'group_name' => $this->get('notifications.group_name', ''),
+            ],
             'limits' => [
                 'max_file_size_mb' => min(7, max(1, (int) $this->get('limits.max_file_size_mb', 7))),
                 'max_job_size_mb' => min(7, max(1, (int) $this->get('limits.max_job_size_mb', 7))),
@@ -101,7 +104,7 @@ final class RuntimeConfig
             return $this->buildFingerprint;
         }
 
-        $moduleRoot = dirname($this->configPath);
+        $moduleRoot = dirname(__DIR__);
         $sources = [
             $moduleRoot . '/src/bootstrap.php',
             $moduleRoot . '/src/RuntimeConfig.php',
@@ -179,6 +182,7 @@ final class RuntimeConfig
                     'settings' => '/settings',
                 ],
             ],
+            'notifications' => ['group_name' => ''],
             'limits' => [
                 'max_file_size_mb' => 7,
                 'max_job_size_mb' => 7,

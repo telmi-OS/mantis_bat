@@ -98,8 +98,18 @@ final class Installer
     {
         $this->ensureRuntimeDirectories();
         $export = "<?php\n\nreturn " . var_export($config, true) . ";\n";
-        if (file_put_contents($this->configPath(), $export) === false) {
-            throw new RuntimeException('Could not write config file.');
+        $tempPath = tempnam(dirname($this->configPath()), '.config-');
+        if ($tempPath === false) {
+            throw new RuntimeException('Could not create temporary config file.');
+        }
+        try {
+            if (file_put_contents($tempPath, $export, LOCK_EX) !== strlen($export) || !rename($tempPath, $this->configPath())) {
+                throw new RuntimeException('Could not write config file.');
+            }
+        } finally {
+            if (is_file($tempPath)) {
+                @unlink($tempPath);
+            }
         }
     }
 
