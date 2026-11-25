@@ -35,6 +35,15 @@
       "runtime": "php",
       "install_type": "php-public",
       "plan_tag": "pro"
+    },
+    "connectors:private-mail:php": {
+      "title": "Private Mail",
+      "short_description": "A private email client and Ghost tool with configurable sender rules, summaries, notifications, and approved or automatic mail actions.",
+      "entrypoint": "install.php",
+      "icon_repo_path": "connectors/private-mail/php/public/assets/mantis-mini.svg",
+      "runtime": "php",
+      "install_type": "php-public",
+      "plan_tag": "pro"
     }
   }
 }

@@ -507,6 +507,23 @@ p { color: var(--muted); line-height: 1.62; }
 .warning-panel > strong { display:block;color:#fff2eb;font-size:clamp(1.08rem,2vw,1.45rem);line-height:1.4; }
 .warning-panel p { margin:12px 0 0;color:#d8c6c1;font-size:.93rem;line-height:1.65; }
 .activation-phrase > strong { display:block;margin-top:12px;color:#fff2eb;font-family:"Share Tech Mono",monospace;font-size:1rem;line-height:1.7; }
+.preset-card {
+  display:grid;
+  gap:12px;
+  margin:24px 0;
+  padding:clamp(16px,2.5vw,26px);
+  border:1px solid rgba(255,255,255,.11);
+  border-radius:20px;
+  background:linear-gradient(155deg,rgba(255,255,255,.055),rgba(255,255,255,.02));
+}
+.preset-title { display:flex;align-items:center;gap:13px;margin-bottom:3px; }
+.preset-title h3 { margin:0 0 3px;color:#f3f5f9;font-size:1.08rem; }
+.preset-title p { margin:0;color:#939cab;font-size:.8rem; }
+.preset-field { min-width:0;padding:13px;border:1px solid rgba(255,255,255,.07);border-radius:13px;background:rgba(0,0,0,.18); }
+.preset-field > .config-label { display:block;margin:0 0 7px; }
+.preset-field .command-head { margin:-3px 0 5px; }
+.preset-field pre { padding:8px 0 0; }
+.preset-field pre code { white-space:pre-wrap;overflow-wrap:anywhere; }
 .step-list { display:grid;gap:15px;margin:24px 0;padding:0;list-style:none;counter-reset:install-step; }
 .step-list li { position:relative;display:grid;gap:4px;padding:17px 18px 17px 60px;border:1px solid var(--line);border-radius:16px;background:var(--panel-2);counter-increment:install-step; }
 .step-list li::before { content:counter(install-step,decimal-leading-zero);position:absolute;left:18px;top:17px;color:#a990ff;font-family:"Share Tech Mono",monospace;font-size:.8rem; }
@@ -725,6 +742,7 @@ pre code { color:inherit;white-space:pre;overflow-wrap:normal;font-size:inherit;
   .notice-card { padding:13px; }
   .notice-card p { font-size:.77rem; }
   .download-panel { align-items:flex-start;flex-wrap:wrap;padding:15px;gap:12px; }
+  .preset-card { padding:14px; }
   .file-icon { width:47px;height:55px;flex-basis:47px; }
   .download-copy { flex-basis:calc(100% - 63px); }
   .download-button { width:100%; }

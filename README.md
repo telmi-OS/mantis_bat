@@ -54,6 +54,7 @@ The current public implementations are:
 
 ```text
 connectors/telegram/php/
+connectors/private-mail/php/
 tools/rag-prep/php/
 tools/ghost-eval/php/
 tools/nextcloud-talk-connect/php/
@@ -72,6 +73,8 @@ The Telegram connector is built for:
 - cron or URL cron
 
 It connects a user-owned Telegram bot to a user-owned Ghost through Ghost API v2.
+
+Private Mail connects your own email account to two Ghosts. A worker Ghost summarizes new mail and notifies you; a separate autonomous Ghost handles conversations and replies, asking for approval when your rules require it. You can also use its protected mail app to read, write, and organize messages. Consider adding both Ghosts to relevant team or project groups so they can reach the right people and use available shared context. See the [Private Mail guide](docs/private-mail-connector.md) to get started.
 
 The RAG prep tool is built for:
 
@@ -156,6 +159,7 @@ The point is simple: make great things on top of `telmi OS`, not around it.
 - [Project Overview](docs/overview.md)
 - [Quickstart](docs/quickstart.md)
 - [Ghost API v2](docs/ghost-api-v2.md)
+- [Private Mail Connector](docs/private-mail-connector.md)
 - [Self-Hosting PHP](docs/self-hosting-php.md)
 - [RAG Prep Tool](docs/rag-prep-tool.md)
 - [Ghost Eval Tool](docs/ghost-eval-tool.md)
@@ -187,4 +191,4 @@ Plain-language boundary:
 
 ## Status
 
-This branch contains the Telegram PHP connector, the RAG Prep and Ghost Eval tools, the standalone Nextcloud Talk Connect PHP tool, the desktop Files Sync guide, and the AWS S3 Files Sync guide with a ready Lambda deployment bundle.
+This branch contains the Telegram and Private Mail PHP connectors, the RAG Prep and Ghost Eval tools, the standalone Nextcloud Talk Connect PHP tool, the desktop Files Sync guide, and the AWS S3 Files Sync guide with a ready Lambda deployment bundle.
